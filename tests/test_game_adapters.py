@@ -22,12 +22,16 @@ def create_adapter_for_memory_tests() -> tuple[PandorasBlocksAdapter, FakeMemory
 class PandorasBlocksMemoryTests(unittest.TestCase):
     def test_converts_source_field_tiles_to_binary_board(self) -> None:
         adapter, fake_pyboy = create_adapter_for_memory_tests()
-        field_start = adapter._FIELD_ADDRESS
-        field_end = field_start + adapter._FIELD_CELL_COUNT
-        fake_pyboy.memory[field_start:field_end] = bytes(
-            [adapter._EMPTY_TILE] * adapter._FIELD_CELL_COUNT
+        shadow_start = adapter._SHADOW_FIELD_ADDRESS
+        shadow_size = 24 * adapter._SHADOW_FIELD_ROW_STRIDE
+        fake_pyboy.memory[shadow_start : shadow_start + shadow_size] = bytes(
+            [adapter._EMPTY_TILE] * shadow_size
         )
-        first_visible_cell = field_start + (6 * TETRIS_BOARD_SHAPE[1])
+        first_visible_cell = (
+            shadow_start
+            + (6 * adapter._SHADOW_FIELD_ROW_STRIDE)
+            + adapter._SHADOW_FIELD_LEFT_BORDER_WIDTH
+        )
         fake_pyboy.memory[first_visible_cell] = 48
         fake_pyboy.memory[first_visible_cell + 1] = adapter._GHOST_TILE
 

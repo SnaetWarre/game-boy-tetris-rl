@@ -10,9 +10,17 @@ from pyboy import PyBoy
 from gb_tetris_rl.actions import PYBOY_BUTTON_BY_ACTION, TetrisAction
 from gb_tetris_rl.game_adapters import TETRIS_BOARD_SHAPE, create_game_adapter
 from gb_tetris_rl.rewards import TetrisSnapshot, calculate_transition_reward, create_snapshot
-from gb_tetris_rl.roms import validate_tetris_rom
+from gb_tetris_rl.roms import SupportedGame, validate_tetris_rom
 
 TETRIS_OBSERVATION_SHAPE = (TETRIS_BOARD_SHAPE[0] * TETRIS_BOARD_SHAPE[1],)
+TETROMINO_TYPE_COUNT = 7
+PLACEMENT_CONTEXT_SIZE = TETROMINO_TYPE_COUNT * 2
+PLACEMENT_OBSERVATION_SHAPE = (
+    TETRIS_OBSERVATION_SHAPE[0] + PLACEMENT_CONTEXT_SIZE,
+)
+PLACEMENT_ROTATION_COUNT = 4
+PLACEMENT_COLUMN_COUNT = 10
+PLACEMENT_ACTION_COUNT = PLACEMENT_ROTATION_COUNT * PLACEMENT_COLUMN_COUNT
 
 
 class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
@@ -27,6 +35,7 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         render_mode: str | None = None,
         display_emulator_window: bool | None = None,
         emulation_speed: int | None = None,
+        control_mode: str = "buttons",
         frames_per_action: int = 2,
         maximum_episode_steps: int = 20_000,
     ) -> None:
@@ -46,8 +55,12 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
             emulation_speed = 1 if display_emulator_window else 0
         if emulation_speed < 0:
             raise ValueError("emulation_speed cannot be negative")
+        if control_mode not in {"buttons", "placements"}:
+            raise ValueError(f"unsupported control mode: {control_mode}")
 
         validated_rom = validate_tetris_rom(rom_path)
+        if control_mode == "placements" and validated_rom.game is not SupportedGame.PANDORAS_BLOCKS:
+            raise ValueError("placement controls currently require Pandora's Blocks")
         window_backend = "SDL2" if display_emulator_window else "null"
         pyboy_options: dict[str, str | bool] = {
             "window": window_backend,
@@ -62,17 +75,26 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
 
         self.render_mode = render_mode
         self._should_render_frames = display_emulator_window or render_mode == "rgb_array"
+        self._control_mode = control_mode
         self._frames_per_action = frames_per_action
         self._maximum_episode_steps = maximum_episode_steps
         self._episode_step_count = 0
         self._previous_snapshot = self._capture_snapshot()
         self._is_closed = False
 
-        self.action_space = spaces.Discrete(len(TetrisAction))
+        action_count = (
+            PLACEMENT_ACTION_COUNT if control_mode == "placements" else len(TetrisAction)
+        )
+        observation_shape = (
+            PLACEMENT_OBSERVATION_SHAPE
+            if control_mode == "placements"
+            else TETRIS_OBSERVATION_SHAPE
+        )
+        self.action_space = spaces.Discrete(action_count)
         self.observation_space = spaces.Box(
             low=0,
             high=2,
-            shape=TETRIS_OBSERVATION_SHAPE,
+            shape=observation_shape,
             dtype=np.uint8,
         )
 
@@ -97,17 +119,28 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         if not self.action_space.contains(action):
             raise ValueError(f"invalid Tetris action: {action!r}")
 
-        tetris_action = TetrisAction(action)
-        pyboy_button = PYBOY_BUTTON_BY_ACTION[tetris_action]
-        if pyboy_button is not None:
-            self._pyboy.button(pyboy_button)
+        if self._control_mode == "placements":
+            target_rotation, right_moves_from_left_wall = divmod(
+                action,
+                PLACEMENT_COLUMN_COUNT,
+            )
+            emulator_is_running = self._game_adapter.place_piece(
+                target_rotation,
+                right_moves_from_left_wall,
+                render_frames=self._should_render_frames,
+            )
+        else:
+            tetris_action = TetrisAction(action)
+            pyboy_button = PYBOY_BUTTON_BY_ACTION[tetris_action]
+            if pyboy_button is not None:
+                self._pyboy.button(pyboy_button)
 
-        emulator_is_running = self._pyboy.tick(
-            self._frames_per_action,
-            render=self._should_render_frames,
-            sound=False,
-        )
-        self._game_adapter.update_after_tick()
+            emulator_is_running = self._pyboy.tick(
+                self._frames_per_action,
+                render=self._should_render_frames,
+                sound=False,
+            )
+            self._game_adapter.update_after_tick()
         self._episode_step_count += 1
 
         game_is_over = self._game_is_over() or not emulator_is_running
@@ -140,7 +173,18 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
             self._is_closed = True
 
     def _observe(self) -> NDArray[np.uint8]:
-        return self._read_board().reshape(TETRIS_OBSERVATION_SHAPE)
+        flattened_board = self._read_board().reshape(TETRIS_OBSERVATION_SHAPE)
+        if self._control_mode == "buttons":
+            return flattened_board
+
+        piece_context = np.zeros(PLACEMENT_CONTEXT_SIZE, dtype=np.uint8)
+        current_piece = self._game_adapter.current_piece
+        next_piece = self._game_adapter.next_piece
+        if 0 <= current_piece < TETROMINO_TYPE_COUNT:
+            piece_context[current_piece] = 1
+        if 0 <= next_piece < TETROMINO_TYPE_COUNT:
+            piece_context[TETROMINO_TYPE_COUNT + next_piece] = 1
+        return np.concatenate((flattened_board, piece_context))
 
     def _read_board(self) -> NDArray[np.uint8]:
         return self._game_adapter.read_board()
@@ -164,4 +208,6 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
             "holes": snapshot.board.holes,
             "bumpiness": snapshot.board.bumpiness,
             "episode_steps": self._episode_step_count,
+            "current_piece": self._game_adapter.current_piece,
+            "next_piece": self._game_adapter.next_piece,
         }

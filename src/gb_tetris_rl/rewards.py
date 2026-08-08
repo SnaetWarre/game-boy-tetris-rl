@@ -60,7 +60,7 @@ def calculate_transition_reward(
     cleared_line_count = max(0, current_snapshot.cleared_lines - previous_snapshot.cleared_lines)
     score_gain = max(0, current_snapshot.score - previous_snapshot.score)
 
-    line_clear_reward_by_count = (0.0, 1.0, 3.0, 5.0, 8.0)
+    line_clear_reward_by_count = (0.0, 10.0, 30.0, 60.0, 100.0)
     line_clear_reward = line_clear_reward_by_count[min(cleared_line_count, 4)]
 
     removed_holes = previous_snapshot.board.holes - current_snapshot.board.holes
@@ -69,13 +69,13 @@ def calculate_transition_reward(
     )
     reduced_bumpiness = previous_snapshot.board.bumpiness - current_snapshot.board.bumpiness
 
-    board_quality_reward = 0.08 * removed_holes + 0.004 * reduced_height + 0.002 * reduced_bumpiness
-    survival_reward = 0.001
-    game_over_penalty = -5.0 if game_is_over else 0.0
+    board_quality_reward = 0.5 * removed_holes + 0.02 * reduced_height + 0.01 * reduced_bumpiness
+    survival_reward = 0.05
+    game_over_penalty = -20.0 if game_is_over else 0.0
 
     return float(
         line_clear_reward
-        + 0.0005 * score_gain
+        + 0.0001 * score_gain
         + board_quality_reward
         + survival_reward
         + game_over_penalty

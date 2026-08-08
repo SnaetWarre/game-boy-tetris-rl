@@ -4,11 +4,11 @@ A deliberately small reinforcement-learning project that trains a CUDA-backed
 DQN agent to play a real Game Boy falling-block game through
 [PyBoy](https://github.com/Baekalfen/PyBoy).
 
-The agent sees PyBoy's simplified 18 by 10 board instead of scraping pixels. It
-can wait, move left or right, rotate in either direction, soft-drop, and
-hard-drop. Rewards
-combine actual score and cleared lines with small board-quality signals for
-holes, height, and bumpiness.
+The agent sees the settled 18 by 10 board instead of scraping pixels. Pandora's
+Blocks supports both frame-level buttons and a faster placement action: choose
+one of four rotations and one of ten columns, then hard-drop. Rewards prioritize
+actual cleared lines and score, with smaller signals for holes, height, and
+bumpiness.
 
 ## Legal boundary
 
@@ -60,23 +60,22 @@ Add `--window` to watch the emulator at normal speed.
 ```sh
 gb-tetris-rl train \
   --rom roms/PandorasBlocks.gbc \
-  --timesteps 250000 \
+  --controls placements \
+  --expert-samples 50000 \
+  --expert-epochs 80 \
+  --timesteps 50000 \
   --output models/tetris-dqn \
   --device cuda \
-  --envs 4 \
-  --speed 0 \
-  --window
+  --envs 8
 ```
 
-Training uses Stable-Baselines3's DQN with a compact two-layer MLP. PyBoy runs
-headlessly and without a speed limit by default. `--window` instead renders the
-actual emulator continuously at normal Game Boy speed while the CUDA-backed
-network trains. `--envs 4` runs four independent PyBoy processes, displays the
-first one, and batches their experience into the shared CUDA policy. This is
-more useful than putting the instruction-dependent Game Boy CPU loop on a GPU.
-`--speed 0` keeps drawing the visible worker without applying the normal 60 FPS
-frame limiter; use `--speed 1` when you want human-speed playback while training.
-Checkpoints are written beside the final model.
+Training first distills good placements from a deterministic board planner into
+the CUDA network, then fine-tunes with Stable-Baselines3 DQN. The pre-RL model is
+saved as `models/tetris-dqn-expert.zip`; this matters because RL is only an
+improvement if real-ROM evaluation beats that checkpoint. PyBoy runs headlessly
+and without a frame limit by default. `--envs 8` feeds the shared CUDA policy
+from eight emulator processes. Add `--window --speed 0` to display the first
+worker at unlimited speed, or `--speed 1` for human-speed rendering.
 
 The first useful milestone is not "perfect Tetris." It is beating the random
 policy on mean lines cleared over the same deterministic episode seeds.
@@ -86,13 +85,28 @@ policy on mean lines cleared over the same deterministic episode seeds.
 ```sh
 gb-tetris-rl watch \
   --rom roms/PandorasBlocks.gbc \
-  --model models/tetris-dqn.zip \
-  --episodes 3 \
-  --record recordings/tetris-agent.gif
+  --model models/tetris-dqn-expert.zip \
+  --controls placements \
+  --expert-safety \
+  --target-lines 100 \
+  --episodes 1 \
+  --window
 ```
 
-Use `--window` for an SDL window. GIF recording is intentionally optional so
-headless training does not pay rendering costs.
+`--expert-safety` keeps the network's placement when it agrees with the
+two-piece afterstate planner and corrects it otherwise. Omit the flag to measure
+the neural policy alone. This separation prevents a visually impressive hybrid
+run from being reported as pure-network performance. Use `--record` to write a
+GIF instead of opening an SDL window.
+
+To validate the emulator controls and counters without any neural model:
+
+```sh
+gb-tetris-rl heuristic \
+  --rom roms/PandorasBlocks.gbc \
+  --target-lines 40 \
+  --seed 0
+```
 
 ## Project structure
 
@@ -101,13 +115,18 @@ src/gb_tetris_rl/
   environment.py   Gymnasium/PyBoy boundary
   game_adapters.py source-backed state readers for both supported games
   homebrew.py      pinned GPL ROM and symbol downloader
+  heuristic.py     fast afterstate simulation and two-piece planner
+  expert_training.py CUDA policy distillation dataset and optimizer
   rewards.py       Pure board measurements and reward shaping
   roms.py          ROM header validation
   training.py      DQN configuration and checkpoints
   playback.py      Evaluation and GIF recording
-  cli.py           doctor, random, train, and watch commands
+  cli.py           doctor, random, heuristic, train, and watch commands
 tests/
+  test_expert_training.py
   test_environment.py
+  test_game_adapters.py
+  test_heuristic.py
   test_playback.py
   test_rewards.py
   test_roms.py

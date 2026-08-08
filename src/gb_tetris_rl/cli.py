@@ -31,6 +31,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
     random_parser.add_argument("--steps", type=_positive_integer, default=2_000)
     random_parser.add_argument("--seed", type=int, default=0)
     random_parser.add_argument("--window", action="store_true")
+    random_parser.add_argument(
+        "--controls", choices=("buttons", "placements"), default="buttons"
+    )
+
+    heuristic_parser = command_parsers.add_parser(
+        "heuristic", help="play with a deterministic two-piece placement planner"
+    )
+    _add_rom_argument(heuristic_parser)
+    heuristic_parser.add_argument("--target-lines", type=_positive_integer, default=5)
+    heuristic_parser.add_argument("--maximum-pieces", type=_positive_integer, default=2_000)
+    heuristic_parser.add_argument("--seed", type=int, default=0)
+    heuristic_parser.add_argument("--window", action="store_true")
 
     train_parser = command_parsers.add_parser("train", help="train a DQN agent")
     _add_rom_argument(train_parser)
@@ -38,6 +50,9 @@ def build_argument_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--output", type=Path, default=Path("models/tetris-dqn"))
     train_parser.add_argument("--seed", type=int, default=0)
     train_parser.add_argument("--device", default="auto")
+    train_parser.add_argument(
+        "--controls", choices=("buttons", "placements"), default="placements"
+    )
     train_parser.add_argument(
         "--envs",
         type=_positive_integer,
@@ -55,6 +70,18 @@ def build_argument_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="show the emulator continuously while the agent trains (slower)",
     )
+    train_parser.add_argument(
+        "--expert-samples",
+        type=_nonnegative_integer,
+        default=0,
+        help="bootstrap placement DQN from this many heuristic demonstrations",
+    )
+    train_parser.add_argument(
+        "--expert-epochs",
+        type=_nonnegative_integer,
+        default=0,
+        help="CUDA classification passes over heuristic demonstrations",
+    )
 
     watch_parser = command_parsers.add_parser(
         "watch", help="evaluate a trained model and optionally record a GIF"
@@ -71,6 +98,19 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     watch_parser.add_argument("--seed", type=int, default=10_000)
     watch_parser.add_argument("--window", action="store_true")
+    watch_parser.add_argument(
+        "--controls", choices=("buttons", "placements"), default="placements"
+    )
+    watch_parser.add_argument(
+        "--expert-safety",
+        action="store_true",
+        help="replace weak neural placements with the deterministic afterstate planner",
+    )
+    watch_parser.add_argument(
+        "--target-lines",
+        type=_positive_integer,
+        help="finish each playback episode after this many cleared lines",
+    )
 
     return parser
 
@@ -87,6 +127,15 @@ def main() -> None:
             _run_random_policy(
                 arguments.rom,
                 maximum_steps=arguments.steps,
+                seed=arguments.seed,
+                show_window=arguments.window,
+                control_mode=arguments.controls,
+            )
+        elif arguments.command == "heuristic":
+            _run_heuristic_policy(
+                arguments.rom,
+                target_lines=arguments.target_lines,
+                maximum_pieces=arguments.maximum_pieces,
                 seed=arguments.seed,
                 show_window=arguments.window,
             )
@@ -165,11 +214,16 @@ def _run_random_policy(
     maximum_steps: int,
     seed: int,
     show_window: bool,
+    control_mode: str,
 ) -> None:
     from gb_tetris_rl.environment import TetrisEnvironment
 
     render_mode = "human" if show_window else None
-    environment = TetrisEnvironment(rom_path, render_mode=render_mode)
+    environment = TetrisEnvironment(
+        rom_path,
+        render_mode=render_mode,
+        control_mode=control_mode,
+    )
     total_reward = 0.0
     completed_steps = 0
     try:
@@ -203,8 +257,51 @@ def _run_training(arguments: argparse.Namespace) -> None:
         show_window=arguments.window,
         environment_count=arguments.envs,
         emulation_speed=arguments.speed,
+        control_mode=arguments.controls,
+        expert_sample_count=arguments.expert_samples,
+        expert_epoch_count=arguments.expert_epochs,
     )
     print(f"Saved model: {saved_model_path}")
+
+
+def _run_heuristic_policy(
+    rom_path: Path,
+    *,
+    target_lines: int,
+    maximum_pieces: int,
+    seed: int,
+    show_window: bool,
+) -> None:
+    from gb_tetris_rl.environment import TETRIS_OBSERVATION_SHAPE, TetrisEnvironment
+    from gb_tetris_rl.heuristic import choose_placement_action
+
+    environment = TetrisEnvironment(
+        rom_path,
+        render_mode="human" if show_window else None,
+        emulation_speed=0,
+        control_mode="placements",
+    )
+    try:
+        observation, episode_info = environment.reset(seed=seed)
+        for _ in range(maximum_pieces):
+            board = observation[: TETRIS_OBSERVATION_SHAPE[0]].reshape(18, 10)
+            action = choose_placement_action(
+                board,
+                episode_info["current_piece"],
+                episode_info["next_piece"],
+            )
+            observation, _, terminated, truncated, episode_info = environment.step(action)
+            if episode_info["cleared_lines"] >= target_lines or terminated or truncated:
+                break
+    finally:
+        environment.close()
+
+    target_was_reached = episode_info["cleared_lines"] >= target_lines
+    print(
+        f"Heuristic policy: target_reached={target_was_reached}, "
+        f"pieces={episode_info['episode_steps']}, score={episode_info['score']}, "
+        f"lines={episode_info['cleared_lines']}, holes={episode_info['holes']}"
+    )
 
 
 def _run_bootstrap(output_directory: Path) -> None:
@@ -226,11 +323,15 @@ def _run_playback(arguments: argparse.Namespace) -> None:
         recording_path=arguments.record,
         capture_every_n_steps=arguments.record_every,
         seed=arguments.seed,
+        control_mode=arguments.controls,
+        use_expert_safety=arguments.expert_safety,
+        target_lines=arguments.target_lines,
     )
     for episode_number, episode_info in enumerate(episode_summaries, start=1):
         print(
             f"Episode {episode_number}: score={episode_info['score']}, "
-            f"lines={episode_info['cleared_lines']}, steps={episode_info['episode_steps']}"
+            f"lines={episode_info['cleared_lines']}, steps={episode_info['episode_steps']}, "
+            f"safety_interventions={episode_info['safety_interventions']}"
         )
     if arguments.record is not None:
         print(f"Saved recording: {arguments.record.expanduser().resolve()}")

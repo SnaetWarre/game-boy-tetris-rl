@@ -130,7 +130,7 @@ class EnvironmentContractTests(unittest.TestCase):
         self.assertEqual(next_observation.shape, TETRIS_OBSERVATION_SHAPE)
         self.assertEqual(initial_info["cleared_lines"], 0)
         self.assertEqual(transition_info["episode_steps"], 1)
-        self.assertAlmostEqual(reward, 0.001)
+        self.assertAlmostEqual(reward, 0.05)
         self.assertFalse(terminated)
         self.assertFalse(truncated)
         self.assertEqual(fake_pyboy.game_wrapper.timer_divider, 1)
