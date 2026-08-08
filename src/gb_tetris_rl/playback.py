@@ -1,3 +1,4 @@
+from itertools import count
 from pathlib import Path
 
 from gb_tetris_rl.environment import TETRIS_OBSERVATION_SHAPE, TetrisEnvironment
@@ -15,12 +16,13 @@ def watch_trained_agent(
     control_mode: str = "buttons",
     use_expert_safety: bool = False,
     target_lines: int | None = None,
+    play_forever: bool = False,
 ) -> list[dict[str, int]]:
     if episode_count < 1:
         raise ValueError("episode_count must be at least 1")
     if capture_every_n_steps < 1:
         raise ValueError("capture_every_n_steps must be at least 1")
-    if use_expert_safety and control_mode != "placements":
+    if use_expert_safety and control_mode not in {"placements", "placements-hold"}:
         raise ValueError("expert safety requires placement controls")
     if target_lines is not None and target_lines < 1:
         raise ValueError("target lines must be at least 1")
@@ -44,26 +46,41 @@ def watch_trained_agent(
     maximum_recorded_frames = 3_000
 
     try:
-        for episode_index in range(episode_count):
+        episode_indices = count() if play_forever else range(episode_count)
+        for episode_index in episode_indices:
             observation, episode_info = environment.reset(seed=seed + episode_index)
             episode_finished = False
             episode_step = 0
             safety_intervention_count = 0
+            hold_action_count = 0
             while not episode_finished:
                 action, _ = model.predict(observation, deterministic=True)
                 selected_action = int(action)
                 if use_expert_safety:
-                    from gb_tetris_rl.heuristic import choose_placement_action
+                    from gb_tetris_rl.heuristic import (
+                        choose_hold_placement_action,
+                        choose_placement_action,
+                    )
 
                     board = observation[: TETRIS_OBSERVATION_SHAPE[0]].reshape(18, 10)
-                    safe_action = choose_placement_action(
-                        board,
-                        episode_info["current_piece"],
-                        episode_info["next_piece"],
-                    )
+                    if control_mode == "placements-hold":
+                        safe_action = choose_hold_placement_action(
+                            board,
+                            episode_info["current_piece"],
+                            episode_info["next_piece"],
+                            episode_info["held_piece"],
+                        )
+                    else:
+                        safe_action = choose_placement_action(
+                            board,
+                            episode_info["current_piece"],
+                            episode_info["next_piece"],
+                        )
                     if safe_action != selected_action:
                         safety_intervention_count += 1
                         selected_action = safe_action
+                if control_mode == "placements-hold" and selected_action >= 40:
+                    hold_action_count += 1
                 observation, _, terminated, truncated, episode_info = environment.step(
                     selected_action
                 )
@@ -82,9 +99,15 @@ def watch_trained_agent(
                     frame = environment.render()
                     if frame is not None:
                         recorded_frames.append(frame)
-            episode_summaries.append(
-                {**episode_info, "safety_interventions": safety_intervention_count}
-            )
+            episode_summary = {
+                **episode_info,
+                "safety_interventions": safety_intervention_count,
+                "hold_actions": hold_action_count,
+            }
+            if play_forever:
+                episode_summaries[:] = [episode_summary]
+            else:
+                episode_summaries.append(episode_summary)
     finally:
         environment.close()
 

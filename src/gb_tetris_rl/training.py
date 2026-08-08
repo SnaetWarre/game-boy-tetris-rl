@@ -45,7 +45,7 @@ def train_dqn_agent(
         raise ValueError("expert sample count cannot be negative")
     if expert_epoch_count < 0:
         raise ValueError("expert epoch count cannot be negative")
-    if expert_sample_count > 0 and control_mode != "placements":
+    if expert_sample_count > 0 and control_mode not in {"placements", "placements-hold"}:
         raise ValueError("expert pretraining requires placement controls")
     if (expert_sample_count == 0) != (expert_epoch_count == 0):
         raise ValueError("expert samples and epochs must either both be zero or both be positive")
@@ -102,9 +102,10 @@ def train_dqn_agent(
     replay_warmup_steps = min(25_000, max(1_000, total_timesteps // 20))
     vector_step_training_frequency = max(1, 4 // environment_count)
     gradient_steps_per_update = max(1, environment_count // 4)
-    network_layers = [512, 512, 256] if control_mode == "placements" else [256, 256]
-    training_batch_size = 512 if control_mode == "placements" else 128
-    replay_buffer_size = 500_000 if control_mode == "placements" else 100_000
+    uses_placement_controls = control_mode in {"placements", "placements-hold"}
+    network_layers = [512, 512, 256] if uses_placement_controls else [256, 256]
+    training_batch_size = 512 if uses_placement_controls else 128
+    replay_buffer_size = 500_000 if uses_placement_controls else 100_000
     model = DQN(
         "MlpPolicy",
         training_environment,
@@ -132,7 +133,11 @@ def train_dqn_agent(
             )
 
             print(f"Generating {expert_sample_count:,} heuristic expert placements...")
-            expert_dataset = generate_expert_dataset(expert_sample_count, seed=seed)
+            expert_dataset = generate_expert_dataset(
+                expert_sample_count,
+                seed=seed,
+                use_hold=control_mode == "placements-hold",
+            )
             expert_metrics = pretrain_dqn_policy(
                 model,
                 expert_dataset,

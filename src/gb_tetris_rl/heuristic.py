@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from gb_tetris_rl.environment import PLACEMENT_COLUMN_COUNT
+from gb_tetris_rl.environment import PLACEMENT_ACTION_COUNT, PLACEMENT_COLUMN_COUNT
 from gb_tetris_rl.rewards import measure_board
 
 Board = NDArray[np.uint8]
@@ -107,9 +107,56 @@ def choose_placement_action(
     *,
     lookahead_weight: float = 0.65,
 ) -> int:
-    current_placements = enumerate_placements(board, current_piece)
+    action, _ = _choose_action_with_quality(
+        board,
+        current_piece,
+        next_piece,
+        lookahead_weight=lookahead_weight,
+    )
+    return action
+
+
+def choose_hold_placement_action(
+    board: Board,
+    current_piece: int,
+    next_piece: int,
+    held_piece: int,
+    *,
+    use_lookahead: bool = True,
+) -> int:
+    comparable_normal_lookahead = (
+        next_piece if use_lookahead and held_piece != 7 else None
+    )
+    normal_action, normal_quality = _choose_action_with_quality(
+        board,
+        current_piece,
+        comparable_normal_lookahead,
+    )
+
+    piece_after_hold = next_piece if held_piece == 7 else held_piece
+    hold_lookahead_piece = (
+        next_piece if use_lookahead and held_piece != 7 else None
+    )
+    hold_action, hold_quality = _choose_action_with_quality(
+        board,
+        piece_after_hold,
+        hold_lookahead_piece,
+    )
+    if hold_quality > normal_quality:
+        return PLACEMENT_ACTION_COUNT + hold_action
+    return normal_action
+
+
+def _choose_action_with_quality(
+    board: Board,
+    piece: int,
+    next_piece: int | None,
+    *,
+    lookahead_weight: float = 0.65,
+) -> tuple[int, float]:
+    current_placements = enumerate_placements(board, piece)
     if not current_placements:
-        return 0
+        return 0, float("-inf")
 
     best_action = current_placements[0].action
     best_action_quality = float("-inf")
@@ -121,12 +168,10 @@ def choose_placement_action(
                 action_quality += lookahead_weight * max(
                     next_placement.quality for next_placement in next_placements
                 )
-
         if action_quality > best_action_quality:
-            best_action_quality = action_quality
             best_action = current_placement.action
-
-    return best_action
+            best_action_quality = action_quality
+    return best_action, best_action_quality
 
 
 def enumerate_placements(board: Board, piece: int) -> list[SimulatedPlacement]:

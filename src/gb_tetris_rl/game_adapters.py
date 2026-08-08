@@ -22,6 +22,7 @@ class TetrisGameAdapter(Protocol):
         target_rotation: int,
         right_moves_from_left_wall: int,
         *,
+        use_hold: bool,
         render_frames: bool,
     ) -> bool: ...
 
@@ -42,6 +43,9 @@ class TetrisGameAdapter(Protocol):
 
     @property
     def next_piece(self) -> int: ...
+
+    @property
+    def held_piece(self) -> int: ...
 
 
 class NintendoTetrisAdapter:
@@ -70,9 +74,10 @@ class NintendoTetrisAdapter:
         target_rotation: int,
         right_moves_from_left_wall: int,
         *,
+        use_hold: bool,
         render_frames: bool,
     ) -> bool:
-        del target_rotation, right_moves_from_left_wall, render_frames
+        del target_rotation, right_moves_from_left_wall, use_hold, render_frames
         raise RuntimeError("placement controls require Pandora's Blocks")
 
     @property
@@ -100,6 +105,10 @@ class NintendoTetrisAdapter:
     def next_piece(self) -> int:
         return 0
 
+    @property
+    def held_piece(self) -> int:
+        return 7
+
 
 class PandorasBlocksAdapter:
     """Reads the GPL game's named state from its source-matched WRAM layout."""
@@ -123,6 +132,9 @@ class PandorasBlocksAdapter:
     _MODE_ADDRESS = 0xFFE5
     _CURRENT_PIECE_ADDRESS = 0xFFDF
     _NEXT_PIECE_ADDRESS = 0xFFD2
+    _HELD_PIECE_ADDRESS = 0xFFE3
+    _HOLD_SPENT_ADDRESS = 0xFFE4
+    _HOLD_SPENT_VALUE = 0xFF
     _PIECE_IN_MOTION_MODE = 15
     _GAME_OVER_MODES = frozenset({21, 24})
     _DROP_MODE_ADDRESS = 0xCF3A
@@ -131,6 +143,7 @@ class PandorasBlocksAdapter:
     _CHILL_SPEED_CURVE = 5
     _LEFT_WALL_MOVE_COUNT = 10
     _MAXIMUM_SPAWN_WAIT_FRAMES = 240
+    _MAXIMUM_HOLD_WAIT_FRAMES = 120
 
     def __init__(self, pyboy: PyBoy) -> None:
         self._pyboy = pyboy
@@ -189,12 +202,35 @@ class PandorasBlocksAdapter:
         target_rotation: int,
         right_moves_from_left_wall: int,
         *,
+        use_hold: bool,
         render_frames: bool,
     ) -> bool:
         if int(self._pyboy.memory[self._MODE_ADDRESS]) != self._PIECE_IN_MOTION_MODE:
             raise RuntimeError("cannot place a piece outside piece-in-motion mode")
 
         emulator_is_running = True
+        if use_hold:
+            for hold_wait_frame in range(self._MAXIMUM_HOLD_WAIT_FRAMES):
+                hold_was_applied = (
+                    int(self._pyboy.memory[self._HOLD_SPENT_ADDRESS])
+                    == self._HOLD_SPENT_VALUE
+                )
+                piece_is_in_motion = (
+                    int(self._pyboy.memory[self._MODE_ADDRESS])
+                    == self._PIECE_IN_MOTION_MODE
+                )
+                if hold_was_applied and piece_is_in_motion:
+                    break
+                if self.game_is_over or not emulator_is_running:
+                    return emulator_is_running
+                should_retry_hold_input = hold_wait_frame % 8 == 0 and piece_is_in_motion
+                if should_retry_hold_input:
+                    emulator_is_running = self._press_button("select", render_frames)
+                else:
+                    emulator_is_running = self._tick_frame(render_frames)
+            else:
+                raise RuntimeError("Pandora's Blocks did not finish the hold action")
+
         if int(self._pyboy.memory[self._STALE_PIECE_ADDRESS]) == 0:
             emulator_is_running = self._tick_frame(render_frames)
 
@@ -256,6 +292,10 @@ class PandorasBlocksAdapter:
     @property
     def next_piece(self) -> int:
         return int(self._pyboy.memory[self._NEXT_PIECE_ADDRESS])
+
+    @property
+    def held_piece(self) -> int:
+        return int(self._pyboy.memory[self._HELD_PIECE_ADDRESS])
 
     def _boot_into_gameplay(self) -> None:
         self._pyboy.tick(180, render=True, sound=False)

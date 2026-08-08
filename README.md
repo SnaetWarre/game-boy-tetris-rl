@@ -99,6 +99,24 @@ the neural policy alone. This separation prevents a visually impressive hybrid
 run from being reported as pure-network performance. Use `--record` to write a
 GIF instead of opening an SDL window.
 
+Hold-aware placement uses a separate observation/action contract so older
+models remain loadable: 202 inputs include the held-piece one-hot state, and 80
+actions represent 40 direct placements plus 40 hold-then-place decisions.
+
+```sh
+gb-tetris-rl heuristic \
+  --rom roms/PandorasBlocks.gbc \
+  --hold \
+  --forever \
+  --window \
+  --speed 1
+```
+
+`--forever` resets to another deterministic seed after a top-out or the 20,000
+piece safety limit. It intentionally has no line target. `--speed 1` preserves
+the Game Boy clock, so the ROM's level-dependent gravity acceleration remains
+visible; use `--speed 0` for unlimited emulation speed.
+
 To validate the emulator controls and counters without any neural model:
 
 ```sh

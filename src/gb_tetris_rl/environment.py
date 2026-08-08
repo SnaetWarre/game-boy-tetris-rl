@@ -21,6 +21,11 @@ PLACEMENT_OBSERVATION_SHAPE = (
 PLACEMENT_ROTATION_COUNT = 4
 PLACEMENT_COLUMN_COUNT = 10
 PLACEMENT_ACTION_COUNT = PLACEMENT_ROTATION_COUNT * PLACEMENT_COLUMN_COUNT
+HELD_PIECE_TYPE_COUNT = TETROMINO_TYPE_COUNT + 1
+HOLD_PLACEMENT_OBSERVATION_SHAPE = (
+    PLACEMENT_OBSERVATION_SHAPE[0] + HELD_PIECE_TYPE_COUNT,
+)
+HOLD_PLACEMENT_ACTION_COUNT = PLACEMENT_ACTION_COUNT * 2
 
 
 class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
@@ -55,11 +60,14 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
             emulation_speed = 1 if display_emulator_window else 0
         if emulation_speed < 0:
             raise ValueError("emulation_speed cannot be negative")
-        if control_mode not in {"buttons", "placements"}:
+        if control_mode not in {"buttons", "placements", "placements-hold"}:
             raise ValueError(f"unsupported control mode: {control_mode}")
 
         validated_rom = validate_tetris_rom(rom_path)
-        if control_mode == "placements" and validated_rom.game is not SupportedGame.PANDORAS_BLOCKS:
+        if (
+            control_mode in {"placements", "placements-hold"}
+            and validated_rom.game is not SupportedGame.PANDORAS_BLOCKS
+        ):
             raise ValueError("placement controls currently require Pandora's Blocks")
         window_backend = "SDL2" if display_emulator_window else "null"
         pyboy_options: dict[str, str | bool] = {
@@ -82,14 +90,18 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         self._previous_snapshot = self._capture_snapshot()
         self._is_closed = False
 
-        action_count = (
-            PLACEMENT_ACTION_COUNT if control_mode == "placements" else len(TetrisAction)
-        )
-        observation_shape = (
-            PLACEMENT_OBSERVATION_SHAPE
-            if control_mode == "placements"
-            else TETRIS_OBSERVATION_SHAPE
-        )
+        action_count_by_control_mode = {
+            "buttons": len(TetrisAction),
+            "placements": PLACEMENT_ACTION_COUNT,
+            "placements-hold": HOLD_PLACEMENT_ACTION_COUNT,
+        }
+        observation_shape_by_control_mode = {
+            "buttons": TETRIS_OBSERVATION_SHAPE,
+            "placements": PLACEMENT_OBSERVATION_SHAPE,
+            "placements-hold": HOLD_PLACEMENT_OBSERVATION_SHAPE,
+        }
+        action_count = action_count_by_control_mode[control_mode]
+        observation_shape = observation_shape_by_control_mode[control_mode]
         self.action_space = spaces.Discrete(action_count)
         self.observation_space = spaces.Box(
             low=0,
@@ -119,14 +131,20 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         if not self.action_space.contains(action):
             raise ValueError(f"invalid Tetris action: {action!r}")
 
-        if self._control_mode == "placements":
+        if self._control_mode in {"placements", "placements-hold"}:
+            use_hold, placement_action = (
+                divmod(action, PLACEMENT_ACTION_COUNT)
+                if self._control_mode == "placements-hold"
+                else (0, action)
+            )
             target_rotation, right_moves_from_left_wall = divmod(
-                action,
+                placement_action,
                 PLACEMENT_COLUMN_COUNT,
             )
             emulator_is_running = self._game_adapter.place_piece(
                 target_rotation,
                 right_moves_from_left_wall,
+                use_hold=bool(use_hold),
                 render_frames=self._should_render_frames,
             )
         else:
@@ -184,7 +202,15 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
             piece_context[current_piece] = 1
         if 0 <= next_piece < TETROMINO_TYPE_COUNT:
             piece_context[TETROMINO_TYPE_COUNT + next_piece] = 1
-        return np.concatenate((flattened_board, piece_context))
+        placement_observation = np.concatenate((flattened_board, piece_context))
+        if self._control_mode == "placements":
+            return placement_observation
+
+        held_piece_context = np.zeros(HELD_PIECE_TYPE_COUNT, dtype=np.uint8)
+        held_piece = self._game_adapter.held_piece
+        if 0 <= held_piece < HELD_PIECE_TYPE_COUNT:
+            held_piece_context[held_piece] = 1
+        return np.concatenate((placement_observation, held_piece_context))
 
     def _read_board(self) -> NDArray[np.uint8]:
         return self._game_adapter.read_board()
@@ -210,4 +236,5 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
             "episode_steps": self._episode_step_count,
             "current_piece": self._game_adapter.current_piece,
             "next_piece": self._game_adapter.next_piece,
+            "held_piece": self._game_adapter.held_piece,
         }

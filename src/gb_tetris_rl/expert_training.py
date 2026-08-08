@@ -4,11 +4,16 @@ import numpy as np
 from numpy.typing import NDArray
 
 from gb_tetris_rl.environment import (
+    HELD_PIECE_TYPE_COUNT,
     PLACEMENT_CONTEXT_SIZE,
     TETRIS_OBSERVATION_SHAPE,
     TETROMINO_TYPE_COUNT,
 )
-from gb_tetris_rl.heuristic import choose_placement_action, enumerate_placements
+from gb_tetris_rl.heuristic import (
+    choose_hold_placement_action,
+    choose_placement_action,
+    enumerate_placements,
+)
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,7 @@ def generate_expert_dataset(
     *,
     seed: int,
     maximum_episode_pieces: int = 40,
+    use_hold: bool = False,
 ) -> ExpertDataset:
     if sample_count < 1:
         raise ValueError("expert sample count must be at least 1")
@@ -35,12 +41,16 @@ def generate_expert_dataset(
         raise ValueError("maximum expert episode pieces must be at least 1")
 
     random_generator = np.random.default_rng(seed)
-    observation_width = TETRIS_OBSERVATION_SHAPE[0] + PLACEMENT_CONTEXT_SIZE
+    hold_context_width = HELD_PIECE_TYPE_COUNT if use_hold else 0
+    observation_width = (
+        TETRIS_OBSERVATION_SHAPE[0] + PLACEMENT_CONTEXT_SIZE + hold_context_width
+    )
     observations = np.zeros((sample_count, observation_width), dtype=np.uint8)
     placement_actions = np.zeros(sample_count, dtype=np.int64)
     board = np.zeros((18, 10), dtype=np.uint8)
     current_piece = int(random_generator.integers(TETROMINO_TYPE_COUNT))
     next_piece = int(random_generator.integers(TETROMINO_TYPE_COUNT))
+    held_piece = 7
     episode_piece_count = 0
 
     for sample_index in range(sample_count):
@@ -48,6 +58,7 @@ def generate_expert_dataset(
         if not legal_placements or episode_piece_count >= maximum_episode_pieces:
             board.fill(0)
             episode_piece_count = 0
+            held_piece = 7
             legal_placements = enumerate_placements(board, current_piece)
 
         observations[sample_index, : TETRIS_OBSERVATION_SHAPE[0]] = board.reshape(-1)
@@ -56,11 +67,39 @@ def generate_expert_dataset(
             sample_index,
             TETRIS_OBSERVATION_SHAPE[0] + TETROMINO_TYPE_COUNT + next_piece,
         ] = 1
+        if use_hold:
+            observations[
+                sample_index,
+                TETRIS_OBSERVATION_SHAPE[0] + PLACEMENT_CONTEXT_SIZE + held_piece,
+            ] = 1
 
-        expert_action = choose_placement_action(board, current_piece)
+        expert_action = (
+            choose_hold_placement_action(
+                board,
+                current_piece,
+                next_piece,
+                held_piece,
+                use_lookahead=False,
+            )
+            if use_hold
+            else choose_placement_action(board, current_piece)
+        )
         placement_actions[sample_index] = expert_action
+        placement_action = expert_action
+        piece_to_place = current_piece
+        if use_hold and expert_action >= 40:
+            placement_action -= 40
+            piece_to_place = next_piece if held_piece == 7 else held_piece
+            previous_held_piece = held_piece
+            held_piece = current_piece
+            if previous_held_piece == 7:
+                next_piece = int(random_generator.integers(TETROMINO_TYPE_COUNT))
+
+        legal_placements = enumerate_placements(board, piece_to_place)
         board = next(
-            placement.board for placement in legal_placements if placement.action == expert_action
+            placement.board
+            for placement in legal_placements
+            if placement.action == placement_action
         )
         current_piece = next_piece
         next_piece = int(random_generator.integers(TETROMINO_TYPE_COUNT))

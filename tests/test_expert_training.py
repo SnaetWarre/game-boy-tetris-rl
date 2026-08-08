@@ -17,6 +17,19 @@ class ExpertDatasetTests(unittest.TestCase):
         self.assertTrue(np.all(expert_dataset.observations[:, 180:187].sum(axis=1) == 1))
         self.assertTrue(np.all(expert_dataset.observations[:, 187:194].sum(axis=1) == 1))
 
+    def test_hold_dataset_includes_held_piece_context_and_hold_actions(self) -> None:
+        expert_dataset = generate_expert_dataset(
+            100,
+            seed=4,
+            maximum_episode_pieces=20,
+            use_hold=True,
+        )
+
+        self.assertEqual(expert_dataset.observations.shape, (100, 202))
+        self.assertTrue(np.all(expert_dataset.observations[:, 194:202].sum(axis=1) == 1))
+        self.assertTrue(np.any(expert_dataset.placement_actions >= 40))
+        self.assertTrue(np.all(expert_dataset.placement_actions < 80))
+
 
 if __name__ == "__main__":
     unittest.main()

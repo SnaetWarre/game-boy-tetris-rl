@@ -4,6 +4,7 @@ import numpy as np
 
 from gb_tetris_rl.heuristic import (
     PANDORAS_PIECE_ROTATIONS,
+    choose_hold_placement_action,
     choose_placement_action,
     enumerate_placements,
     simulate_hard_drop,
@@ -41,6 +42,19 @@ class PlacementHeuristicTests(unittest.TestCase):
         action = choose_placement_action(board, current_piece=0)
 
         self.assertEqual(action, 6)
+
+    def test_hold_planner_can_choose_the_held_piece(self) -> None:
+        board = np.zeros((18, 10), dtype=np.uint8)
+
+        action = choose_hold_placement_action(
+            board,
+            current_piece=1,
+            next_piece=0,
+            held_piece=0,
+        )
+
+        self.assertGreaterEqual(action, 40)
+        self.assertLess(action, 80)
 
 
 if __name__ == "__main__":

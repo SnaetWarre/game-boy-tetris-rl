@@ -31,9 +31,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     random_parser.add_argument("--steps", type=_positive_integer, default=2_000)
     random_parser.add_argument("--seed", type=int, default=0)
     random_parser.add_argument("--window", action="store_true")
-    random_parser.add_argument(
-        "--controls", choices=("buttons", "placements"), default="buttons"
-    )
+    random_parser.add_argument("--controls", choices=_CONTROL_MODES, default="buttons")
 
     heuristic_parser = command_parsers.add_parser(
         "heuristic", help="play with a deterministic two-piece placement planner"
@@ -43,6 +41,14 @@ def build_argument_parser() -> argparse.ArgumentParser:
     heuristic_parser.add_argument("--maximum-pieces", type=_positive_integer, default=2_000)
     heuristic_parser.add_argument("--seed", type=int, default=0)
     heuristic_parser.add_argument("--window", action="store_true")
+    heuristic_parser.add_argument("--hold", action="store_true")
+    heuristic_parser.add_argument("--forever", action="store_true")
+    heuristic_parser.add_argument(
+        "--speed",
+        type=_nonnegative_integer,
+        default=1,
+        help="visible emulator speed multiplier; 0 removes the frame limiter",
+    )
 
     train_parser = command_parsers.add_parser("train", help="train a DQN agent")
     _add_rom_argument(train_parser)
@@ -50,9 +56,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--output", type=Path, default=Path("models/tetris-dqn"))
     train_parser.add_argument("--seed", type=int, default=0)
     train_parser.add_argument("--device", default="auto")
-    train_parser.add_argument(
-        "--controls", choices=("buttons", "placements"), default="placements"
-    )
+    train_parser.add_argument("--controls", choices=_CONTROL_MODES, default="placements")
     train_parser.add_argument(
         "--envs",
         type=_positive_integer,
@@ -98,9 +102,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     watch_parser.add_argument("--seed", type=int, default=10_000)
     watch_parser.add_argument("--window", action="store_true")
-    watch_parser.add_argument(
-        "--controls", choices=("buttons", "placements"), default="placements"
-    )
+    watch_parser.add_argument("--controls", choices=_CONTROL_MODES, default="placements")
     watch_parser.add_argument(
         "--expert-safety",
         action="store_true",
@@ -110,6 +112,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         "--target-lines",
         type=_positive_integer,
         help="finish each playback episode after this many cleared lines",
+    )
+    watch_parser.add_argument(
+        "--forever",
+        action="store_true",
+        help="automatically start another game after every top-out",
     )
 
     return parser
@@ -138,6 +145,9 @@ def main() -> None:
                 maximum_pieces=arguments.maximum_pieces,
                 seed=arguments.seed,
                 show_window=arguments.window,
+                use_hold=arguments.hold,
+                play_forever=arguments.forever,
+                emulation_speed=arguments.speed,
             )
         elif arguments.command == "train":
             _run_training(arguments)
@@ -154,6 +164,9 @@ def _add_rom_argument(parser: argparse.ArgumentParser) -> None:
         required=True,
         help="path to a legally supplied Game Boy Tetris ROM",
     )
+
+
+_CONTROL_MODES = ("buttons", "placements", "placements-hold")
 
 
 def _positive_integer(raw_value: str) -> int:
@@ -271,27 +284,50 @@ def _run_heuristic_policy(
     maximum_pieces: int,
     seed: int,
     show_window: bool,
+    use_hold: bool,
+    play_forever: bool,
+    emulation_speed: int,
 ) -> None:
     from gb_tetris_rl.environment import TETRIS_OBSERVATION_SHAPE, TetrisEnvironment
-    from gb_tetris_rl.heuristic import choose_placement_action
+    from gb_tetris_rl.heuristic import choose_hold_placement_action, choose_placement_action
 
     environment = TetrisEnvironment(
         rom_path,
         render_mode="human" if show_window else None,
-        emulation_speed=0,
-        control_mode="placements",
+        emulation_speed=emulation_speed if show_window else 0,
+        control_mode="placements-hold" if use_hold else "placements",
     )
+    completed_episode_count = 0
+    hold_action_count = 0
     try:
-        observation, episode_info = environment.reset(seed=seed)
-        for _ in range(maximum_pieces):
-            board = observation[: TETRIS_OBSERVATION_SHAPE[0]].reshape(18, 10)
-            action = choose_placement_action(
-                board,
-                episode_info["current_piece"],
-                episode_info["next_piece"],
+        while True:
+            observation, episode_info = environment.reset(
+                seed=seed + completed_episode_count
             )
-            observation, _, terminated, truncated, episode_info = environment.step(action)
-            if episode_info["cleared_lines"] >= target_lines or terminated or truncated:
+            for _ in range(maximum_pieces):
+                board = observation[: TETRIS_OBSERVATION_SHAPE[0]].reshape(18, 10)
+                if use_hold:
+                    action = choose_hold_placement_action(
+                        board,
+                        episode_info["current_piece"],
+                        episode_info["next_piece"],
+                        episode_info["held_piece"],
+                    )
+                    hold_action_count += int(action >= 40)
+                else:
+                    action = choose_placement_action(
+                        board,
+                        episode_info["current_piece"],
+                        episode_info["next_piece"],
+                    )
+                observation, _, terminated, truncated, episode_info = environment.step(action)
+                target_was_reached = (
+                    not play_forever and episode_info["cleared_lines"] >= target_lines
+                )
+                if target_was_reached or terminated or truncated:
+                    break
+            completed_episode_count += 1
+            if not play_forever:
                 break
     finally:
         environment.close()
@@ -300,7 +336,8 @@ def _run_heuristic_policy(
     print(
         f"Heuristic policy: target_reached={target_was_reached}, "
         f"pieces={episode_info['episode_steps']}, score={episode_info['score']}, "
-        f"lines={episode_info['cleared_lines']}, holes={episode_info['holes']}"
+        f"lines={episode_info['cleared_lines']}, holes={episode_info['holes']}, "
+        f"holds={hold_action_count}"
     )
 
 
@@ -326,11 +363,13 @@ def _run_playback(arguments: argparse.Namespace) -> None:
         control_mode=arguments.controls,
         use_expert_safety=arguments.expert_safety,
         target_lines=arguments.target_lines,
+        play_forever=arguments.forever,
     )
     for episode_number, episode_info in enumerate(episode_summaries, start=1):
         print(
             f"Episode {episode_number}: score={episode_info['score']}, "
             f"lines={episode_info['cleared_lines']}, steps={episode_info['episode_steps']}, "
+            f"holds={episode_info['hold_actions']}, "
             f"safety_interventions={episode_info['safety_interventions']}"
         )
     if arguments.record is not None:
