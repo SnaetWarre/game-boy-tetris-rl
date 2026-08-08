@@ -63,13 +63,17 @@ gb-tetris-rl train \
   --timesteps 250000 \
   --output models/tetris-dqn \
   --device cuda \
+  --envs 4 \
   --window
 ```
 
 Training uses Stable-Baselines3's DQN with a compact two-layer MLP. PyBoy runs
 headlessly and without a speed limit by default. `--window` instead renders the
 actual emulator continuously at normal Game Boy speed while the CUDA-backed
-network trains. Checkpoints are written beside the final model.
+network trains. `--envs 4` runs four independent PyBoy processes, displays the
+first one, and batches their experience into the shared CUDA policy. This is
+more useful than putting the instruction-dependent Game Boy CPU loop on a GPU.
+Checkpoints are written beside the final model.
 
 The first useful milestone is not "perfect Tetris." It is beating the random
 policy on mean lines cleared over the same deterministic episode seeds.

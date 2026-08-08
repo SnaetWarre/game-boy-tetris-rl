@@ -55,6 +55,17 @@ class TrainingSmokeTests(unittest.TestCase):
             self.assertEqual(saved_model_path, output_path.with_suffix(".zip"))
             self.assertTrue(saved_model_path.is_file())
 
+    def test_rejects_zero_parallel_environments(self) -> None:
+        with self.assertRaisesRegex(ValueError, "environment_count"):
+            train_dqn_agent(
+                "unused.gb",
+                "unused-model",
+                total_timesteps=12,
+                seed=7,
+                device="cpu",
+                environment_count=0,
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

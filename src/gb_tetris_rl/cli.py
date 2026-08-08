@@ -39,6 +39,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--seed", type=int, default=0)
     train_parser.add_argument("--device", default="auto")
     train_parser.add_argument(
+        "--envs",
+        type=_positive_integer,
+        default=4,
+        help="parallel PyBoy processes feeding the shared policy",
+    )
+    train_parser.add_argument(
         "--window",
         action="store_true",
         help="show the emulator continuously while the agent trains (slower)",
@@ -182,6 +188,7 @@ def _run_training(arguments: argparse.Namespace) -> None:
         seed=arguments.seed,
         device=arguments.device,
         show_window=arguments.window,
+        environment_count=arguments.envs,
     )
     print(f"Saved model: {saved_model_path}")
 

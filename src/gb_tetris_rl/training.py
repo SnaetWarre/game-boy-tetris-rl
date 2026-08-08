@@ -1,6 +1,17 @@
+from functools import partial
 from pathlib import Path
 
 from gb_tetris_rl.environment import TetrisEnvironment
+
+
+def _create_monitored_environment(
+    rom_path: str | Path,
+    *,
+    render_mode: str | None,
+):
+    from stable_baselines3.common.monitor import Monitor
+
+    return Monitor(TetrisEnvironment(rom_path, render_mode=render_mode))
 
 
 def train_dqn_agent(
@@ -11,12 +22,16 @@ def train_dqn_agent(
     seed: int,
     device: str,
     show_window: bool = False,
+    environment_count: int = 1,
 ) -> Path:
+    if environment_count < 1:
+        raise ValueError("environment_count must be at least 1")
+
     try:
         from stable_baselines3 import DQN
         from stable_baselines3.common.callbacks import CheckpointCallback
         from stable_baselines3.common.env_checker import check_env
-        from stable_baselines3.common.monitor import Monitor
+        from stable_baselines3.common.vec_env import SubprocVecEnv
     except ImportError as import_error:
         raise RuntimeError(
             "training dependencies are missing; install with: python -m pip install -e '.[train]'"
@@ -33,25 +48,39 @@ def train_dqn_agent(
     finally:
         environment.close()
 
-    training_render_mode = "human" if show_window else None
-    monitored_environment = Monitor(
-        TetrisEnvironment(rom_path, render_mode=training_render_mode)
-    )
+    if environment_count == 1:
+        training_render_mode = "human" if show_window else None
+        training_environment = _create_monitored_environment(
+            rom_path,
+            render_mode=training_render_mode,
+        )
+    else:
+        environment_factories = [
+            partial(
+                _create_monitored_environment,
+                rom_path,
+                render_mode="human" if show_window and worker_index == 0 else None,
+            )
+            for worker_index in range(environment_count)
+        ]
+        training_environment = SubprocVecEnv(environment_factories)
+
     checkpoint_callback = CheckpointCallback(
-        save_freq=50_000,
+        save_freq=max(50_000 // environment_count, 1),
         save_path=str(checkpoint_directory),
         name_prefix="tetris-dqn",
     )
     replay_warmup_steps = min(10_000, max(100, total_timesteps // 10))
+    vector_step_training_frequency = max(1, 4 // environment_count)
     model = DQN(
         "MlpPolicy",
-        monitored_environment,
+        training_environment,
         learning_rate=1e-4,
         buffer_size=100_000,
         learning_starts=replay_warmup_steps,
         batch_size=128,
         gamma=0.99,
-        train_freq=4,
+        train_freq=vector_step_training_frequency,
         gradient_steps=1,
         target_update_interval=5_000,
         exploration_fraction=0.25,
@@ -65,6 +94,6 @@ def train_dqn_agent(
         model.learn(total_timesteps=total_timesteps, callback=checkpoint_callback)
         model.save(str(resolved_output_path))
     finally:
-        monitored_environment.close()
+        training_environment.close()
 
     return resolved_output_path.with_suffix(".zip")
