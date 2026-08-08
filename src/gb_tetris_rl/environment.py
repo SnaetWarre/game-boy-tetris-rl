@@ -25,6 +25,7 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         rom_path: str | Path,
         *,
         render_mode: str | None = None,
+        display_emulator_window: bool | None = None,
         frames_per_action: int = 2,
         maximum_episode_steps: int = 20_000,
     ) -> None:
@@ -36,8 +37,13 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         if maximum_episode_steps < 1:
             raise ValueError("maximum_episode_steps must be at least 1")
 
+        if display_emulator_window is None:
+            display_emulator_window = render_mode == "human"
+        if display_emulator_window and render_mode != "human":
+            raise ValueError("display_emulator_window requires render_mode='human'")
+
         validated_rom = validate_tetris_rom(rom_path)
-        window_backend = "SDL2" if render_mode == "human" else "null"
+        window_backend = "SDL2" if display_emulator_window else "null"
         pyboy_options: dict[str, str | bool] = {
             "window": window_backend,
             "sound_emulated": False,
@@ -46,10 +52,11 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         if symbols_path.is_file():
             pyboy_options["symbols"] = str(symbols_path)
         self._pyboy = PyBoy(str(validated_rom.path), **pyboy_options)
-        self._pyboy.set_emulation_speed(1 if render_mode == "human" else 0)
+        self._pyboy.set_emulation_speed(1 if display_emulator_window else 0)
         self._game_adapter = create_game_adapter(validated_rom.game, self._pyboy)
 
         self.render_mode = render_mode
+        self._should_render_frames = display_emulator_window or render_mode == "rgb_array"
         self._frames_per_action = frames_per_action
         self._maximum_episode_steps = maximum_episode_steps
         self._episode_step_count = 0
@@ -90,10 +97,9 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         if pyboy_button is not None:
             self._pyboy.button(pyboy_button)
 
-        should_render_frame = self.render_mode is not None
         emulator_is_running = self._pyboy.tick(
             self._frames_per_action,
-            render=should_render_frame,
+            render=self._should_render_frames,
             sound=False,
         )
         self._game_adapter.update_after_tick()

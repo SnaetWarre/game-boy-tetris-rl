@@ -89,6 +89,27 @@ def write_fake_tetris_rom(directory: str) -> Path:
 
 
 class EnvironmentContractTests(unittest.TestCase):
+    def test_headless_worker_can_share_human_render_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            rom_path = write_fake_tetris_rom(temporary_directory)
+            with patch("gb_tetris_rl.environment.PyBoy", FakePyBoy):
+                environment = TetrisEnvironment(
+                    rom_path,
+                    render_mode="human",
+                    display_emulator_window=False,
+                )
+                try:
+                    environment.step(TetrisAction.WAIT.value)
+                    fake_pyboy = FakePyBoy.latest_instance
+                finally:
+                    environment.close()
+
+        self.assertIsNotNone(fake_pyboy)
+        assert fake_pyboy is not None
+        self.assertEqual(fake_pyboy.window, "null")
+        self.assertEqual(fake_pyboy.emulation_speed, 0)
+        self.assertFalse(fake_pyboy.rendered)
+
     def test_reset_and_step_follow_the_gymnasium_contract(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             rom_path = write_fake_tetris_rom(temporary_directory)

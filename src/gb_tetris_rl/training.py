@@ -8,10 +8,17 @@ def _create_monitored_environment(
     rom_path: str | Path,
     *,
     render_mode: str | None,
+    display_emulator_window: bool | None = None,
 ):
     from stable_baselines3.common.monitor import Monitor
 
-    return Monitor(TetrisEnvironment(rom_path, render_mode=render_mode))
+    return Monitor(
+        TetrisEnvironment(
+            rom_path,
+            render_mode=render_mode,
+            display_emulator_window=display_emulator_window,
+        )
+    )
 
 
 def train_dqn_agent(
@@ -55,11 +62,13 @@ def train_dqn_agent(
             render_mode=training_render_mode,
         )
     else:
+        shared_render_mode = "human" if show_window else None
         environment_factories = [
             partial(
                 _create_monitored_environment,
                 rom_path,
-                render_mode="human" if show_window and worker_index == 0 else None,
+                render_mode=shared_render_mode,
+                display_emulator_window=show_window and worker_index == 0,
             )
             for worker_index in range(environment_count)
         ]
