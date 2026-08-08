@@ -10,6 +10,7 @@ class TetrisAction(IntEnum):
     ROTATE_CLOCKWISE = 3
     ROTATE_COUNTERCLOCKWISE = 4
     SOFT_DROP = 5
+    HARD_DROP = 6
 
 
 PYBOY_BUTTON_BY_ACTION: dict[TetrisAction, str | None] = {
@@ -19,4 +20,5 @@ PYBOY_BUTTON_BY_ACTION: dict[TetrisAction, str | None] = {
     TetrisAction.ROTATE_CLOCKWISE: "a",
     TetrisAction.ROTATE_COUNTERCLOCKWISE: "b",
     TetrisAction.SOFT_DROP: "down",
+    TetrisAction.HARD_DROP: "up",
 }

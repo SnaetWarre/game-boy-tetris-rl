@@ -1,43 +1,47 @@
 # Game Boy Tetris RL
 
-A deliberately small reinforcement-learning project that trains a DQN agent to
-play the original Game Boy version of Tetris through
+A deliberately small reinforcement-learning project that trains a CUDA-backed
+DQN agent to play a real Game Boy falling-block game through
 [PyBoy](https://github.com/Baekalfen/PyBoy).
 
 The agent sees PyBoy's simplified 18 by 10 board instead of scraping pixels. It
-can wait, move left or right, rotate in either direction, and soft-drop. Rewards
+can wait, move left or right, rotate in either direction, soft-drop, and
+hard-drop. Rewards
 combine actual score and cleared lines with small board-quality signals for
 holes, height, and bumpiness.
 
 ## Legal boundary
 
-This repository does not contain, download, patch, or redistribute a Nintendo
-ROM. Supply a Game Boy Tetris ROM dumped from a cartridge you own. ROMs and
-emulator save files are ignored by Git.
+The zero-friction path uses
+[Pandora's Blocks](https://github.com/Villadelfia/dmgtris), an original Game Boy
+homebrew released under GPL-3.0. Its author distributes the ROM and matching
+debug symbols, so `bootstrap` can legally download a checksum-pinned build.
 
-No decompilation is required. PyBoy already provides the interoperability layer:
-controller input, board state, score, lines, level, deterministic reset, and
-headless emulation.
+Nintendo's Tetris is also supported when you supply a ROM dumped from a
+cartridge you own. This repository never downloads or redistributes that ROM.
+All ROMs and emulator save files remain ignored by Git.
+
+No screen scraping is required. The Pandora's Blocks adapter reads the named
+playfield, score, line-clear, level, and game-state locations published by its
+assembly source and `.sym` file.
 
 ## Setup
 
-The project is tested with Python 3.14. Install PyTorch's CPU wheel first so pip
-does not pull a separate multi-gigabyte CUDA runtime for this small network:
+The project is tested with Python 3.14 and PyTorch's CUDA 13 runtime:
 
 ```sh
 python -m venv .venv
 . .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install 'torch==2.13.0+cpu' \
-  --index-url https://download.pytorch.org/whl/cpu
+python -m pip install 'torch==2.13.0'
 python -m pip install -e '.[train,record,dev]'
 ```
 
-Keep the ROM outside the repository or place it in the ignored `roms/` folder.
-Every command validates the cartridge header before starting PyBoy.
+Fetch the open-source homebrew and verify the complete setup:
 
 ```sh
-gb-tetris-rl doctor --rom /path/to/tetris.gb
+gb-tetris-rl bootstrap
+gb-tetris-rl doctor --rom roms/PandorasBlocks.gbc
 ```
 
 ## Try the environment
@@ -46,7 +50,7 @@ Run a short random-policy episode first. This verifies input, observations,
 rewards, and resets without beginning a long training run.
 
 ```sh
-gb-tetris-rl random --rom /path/to/tetris.gb --steps 2000
+gb-tetris-rl random --rom roms/PandorasBlocks.gbc --steps 2000
 ```
 
 Add `--window` to watch the emulator at normal speed.
@@ -55,14 +59,17 @@ Add `--window` to watch the emulator at normal speed.
 
 ```sh
 gb-tetris-rl train \
-  --rom /path/to/tetris.gb \
+  --rom roms/PandorasBlocks.gbc \
   --timesteps 250000 \
-  --output models/tetris-dqn
+  --output models/tetris-dqn \
+  --device cuda \
+  --window
 ```
 
 Training uses Stable-Baselines3's DQN with a compact two-layer MLP. PyBoy runs
-headlessly and without a speed limit. Checkpoints are written beside the final
-model.
+headlessly and without a speed limit by default. `--window` instead renders the
+actual emulator continuously at normal Game Boy speed while the CUDA-backed
+network trains. Checkpoints are written beside the final model.
 
 The first useful milestone is not "perfect Tetris." It is beating the random
 policy on mean lines cleared over the same deterministic episode seeds.
@@ -71,7 +78,7 @@ policy on mean lines cleared over the same deterministic episode seeds.
 
 ```sh
 gb-tetris-rl watch \
-  --rom /path/to/tetris.gb \
+  --rom roms/PandorasBlocks.gbc \
   --model models/tetris-dqn.zip \
   --episodes 3 \
   --record recordings/tetris-agent.gif
@@ -85,6 +92,8 @@ headless training does not pay rendering costs.
 ```text
 src/gb_tetris_rl/
   environment.py   Gymnasium/PyBoy boundary
+  game_adapters.py source-backed state readers for both supported games
+  homebrew.py      pinned GPL ROM and symbol downloader
   rewards.py       Pure board measurements and reward shaping
   roms.py          ROM header validation
   training.py      DQN configuration and checkpoints
@@ -100,6 +109,6 @@ tests/
 
 ## Why Tetris
 
-Tetris has short repeatable episodes, a discrete action space, measurable
-progress, and a compact observation. It is a much more manageable first emulator
-RL target than a long exploration game with sparse rewards.
+Falling-block games have short repeatable episodes, a discrete action space,
+measurable progress, and a compact observation. It is a much more manageable
+first emulator RL target than a long exploration game with sparse rewards.

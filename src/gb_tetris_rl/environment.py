@@ -8,15 +8,15 @@ from numpy.typing import NDArray
 from pyboy import PyBoy
 
 from gb_tetris_rl.actions import PYBOY_BUTTON_BY_ACTION, TetrisAction
+from gb_tetris_rl.game_adapters import TETRIS_BOARD_SHAPE, create_game_adapter
 from gb_tetris_rl.rewards import TetrisSnapshot, calculate_transition_reward, create_snapshot
 from gb_tetris_rl.roms import validate_tetris_rom
 
-TETRIS_BOARD_SHAPE = (18, 10)
 TETRIS_OBSERVATION_SHAPE = (TETRIS_BOARD_SHAPE[0] * TETRIS_BOARD_SHAPE[1],)
 
 
 class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
-    """Gymnasium environment backed by PyBoy's official Tetris wrapper."""
+    """Gymnasium environment backed by a supported PyBoy game adapter."""
 
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 30}
 
@@ -38,18 +38,16 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
 
         validated_rom = validate_tetris_rom(rom_path)
         window_backend = "SDL2" if render_mode == "human" else "null"
-        self._pyboy = PyBoy(
-            str(validated_rom.path),
-            window=window_backend,
-            sound_emulated=False,
-        )
+        pyboy_options: dict[str, str | bool] = {
+            "window": window_backend,
+            "sound_emulated": False,
+        }
+        symbols_path = validated_rom.path.with_suffix(".sym")
+        if symbols_path.is_file():
+            pyboy_options["symbols"] = str(symbols_path)
+        self._pyboy = PyBoy(str(validated_rom.path), **pyboy_options)
         self._pyboy.set_emulation_speed(1 if render_mode == "human" else 0)
-        self._tetris_wrapper = self._pyboy.game_wrapper
-        self._tetris_wrapper.game_area_mapping(
-            self._tetris_wrapper.mapping_minimal,
-            0,
-        )
-        self._tetris_wrapper.start_game(timer_div=0)
+        self._game_adapter = create_game_adapter(validated_rom.game, self._pyboy)
 
         self.render_mode = render_mode
         self._frames_per_action = frames_per_action
@@ -75,8 +73,7 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         del options
         super().reset(seed=seed)
         self.action_space.seed(seed)
-        timer_divider = None if seed is None else seed % 256
-        self._tetris_wrapper.reset_game(timer_div=timer_divider)
+        self._game_adapter.reset(seed)
         self._episode_step_count = 0
         self._previous_snapshot = self._capture_snapshot()
         return self._observe(), self._build_info(self._previous_snapshot)
@@ -99,6 +96,7 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
             render=should_render_frame,
             sound=False,
         )
+        self._game_adapter.update_after_tick()
         self._episode_step_count += 1
 
         game_is_over = self._game_is_over() or not emulator_is_running
@@ -134,29 +132,23 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         return self._read_board().reshape(TETRIS_OBSERVATION_SHAPE)
 
     def _read_board(self) -> NDArray[np.uint8]:
-        board = np.asarray(self._tetris_wrapper.game_area(), dtype=np.uint8)
-        if board.shape != TETRIS_BOARD_SHAPE:
-            raise RuntimeError(
-                f"PyBoy returned board shape {board.shape}; expected {TETRIS_BOARD_SHAPE}"
-            )
-        return np.array(board, dtype=np.uint8, copy=True)
+        return self._game_adapter.read_board()
 
     def _capture_snapshot(self) -> TetrisSnapshot:
         return create_snapshot(
-            score=int(self._tetris_wrapper.score),
-            cleared_lines=int(self._tetris_wrapper.lines),
+            score=self._game_adapter.score,
+            cleared_lines=self._game_adapter.cleared_lines,
             board=self._read_board(),
         )
 
     def _game_is_over(self) -> bool:
-        game_over_value = self._tetris_wrapper.game_over
-        return bool(game_over_value() if callable(game_over_value) else game_over_value)
+        return self._game_adapter.game_is_over
 
     def _build_info(self, snapshot: TetrisSnapshot) -> dict[str, int]:
         return {
             "score": snapshot.score,
             "cleared_lines": snapshot.cleared_lines,
-            "level": int(self._tetris_wrapper.level),
+            "level": self._game_adapter.level,
             "aggregate_height": snapshot.board.aggregate_height,
             "holes": snapshot.board.holes,
             "bumpiness": snapshot.board.bumpiness,

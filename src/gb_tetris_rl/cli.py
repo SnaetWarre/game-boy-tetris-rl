@@ -12,6 +12,13 @@ def build_argument_parser() -> argparse.ArgumentParser:
     )
     command_parsers = parser.add_subparsers(dest="command", required=True)
 
+    bootstrap_parser = command_parsers.add_parser(
+        "bootstrap", help="download the GPL Pandora's Blocks ROM and symbols"
+    )
+    bootstrap_parser.add_argument(
+        "--output-dir", type=Path, default=Path("roms"), help="download directory"
+    )
+
     doctor_parser = command_parsers.add_parser(
         "doctor", help="validate the ROM, dependencies, and one environment transition"
     )
@@ -31,6 +38,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
     train_parser.add_argument("--output", type=Path, default=Path("models/tetris-dqn"))
     train_parser.add_argument("--seed", type=int, default=0)
     train_parser.add_argument("--device", default="auto")
+    train_parser.add_argument(
+        "--window",
+        action="store_true",
+        help="show the emulator continuously while the agent trains (slower)",
+    )
 
     watch_parser = command_parsers.add_parser(
         "watch", help="evaluate a trained model and optionally record a GIF"
@@ -55,7 +67,9 @@ def main() -> None:
     parser = build_argument_parser()
     arguments = parser.parse_args()
     try:
-        if arguments.command == "doctor":
+        if arguments.command == "bootstrap":
+            _run_bootstrap(arguments.output_dir)
+        elif arguments.command == "doctor":
             _run_doctor(arguments.rom)
         elif arguments.command == "random":
             _run_random_policy(
@@ -98,6 +112,16 @@ def _run_doctor(rom_path: Path) -> None:
         except PackageNotFoundError:
             installed_version = "not installed (optional for stable-baselines3)"
         print(f"{package_name}: {installed_version}")
+
+    try:
+        import torch
+
+        print(f"torch: {torch.__version__}")
+        print(f"CUDA available: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            print(f"CUDA device: {torch.cuda.get_device_name(0)}")
+    except ImportError:
+        print("torch: not installed (required for training)")
 
     from gb_tetris_rl.environment import TetrisEnvironment
 
@@ -157,8 +181,17 @@ def _run_training(arguments: argparse.Namespace) -> None:
         total_timesteps=arguments.timesteps,
         seed=arguments.seed,
         device=arguments.device,
+        show_window=arguments.window,
     )
     print(f"Saved model: {saved_model_path}")
+
+
+def _run_bootstrap(output_directory: Path) -> None:
+    from gb_tetris_rl.homebrew import download_pandoras_blocks
+
+    homebrew_files = download_pandoras_blocks(output_directory)
+    print(f"ROM: {homebrew_files.rom_path}")
+    print(f"Symbols: {homebrew_files.symbols_path}")
 
 
 def _run_playback(arguments: argparse.Namespace) -> None:

@@ -2,7 +2,12 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gb_tetris_rl.roms import RomValidationError, read_cartridge_title, validate_tetris_rom
+from gb_tetris_rl.roms import (
+    RomValidationError,
+    SupportedGame,
+    read_cartridge_title,
+    validate_tetris_rom,
+)
 
 
 def create_test_rom(cartridge_title: bytes = b"TETRIS") -> bytes:
@@ -29,6 +34,15 @@ class CartridgeHeaderTests(unittest.TestCase):
 
             self.assertEqual(validated_rom.path, rom_path.resolve())
             self.assertEqual(validated_rom.cartridge_title, "TETRIS")
+            self.assertEqual(validated_rom.game, SupportedGame.NINTENDO_TETRIS)
+
+    def test_rejects_an_unknown_pandoras_blocks_build(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            rom_path = Path(temporary_directory) / "pandoras-blocks.gbc"
+            rom_path.write_bytes(create_test_rom(b"DMGTRIS"))
+
+            with self.assertRaisesRegex(RomValidationError, "unsupported Pandora's Blocks"):
+                validate_tetris_rom(rom_path)
 
     def test_rejects_a_different_game(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

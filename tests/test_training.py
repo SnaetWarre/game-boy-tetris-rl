@@ -12,9 +12,10 @@ from gb_tetris_rl.training import train_dqn_agent
 
 
 class TinyTrainingEnvironment(gym.Env):
-    def __init__(self, rom_path: str | Path) -> None:
+    def __init__(self, rom_path: str | Path, *, render_mode: str | None = None) -> None:
         del rom_path
-        self.action_space = spaces.Discrete(6)
+        del render_mode
+        self.action_space = spaces.Discrete(7)
         self.observation_space = spaces.Box(
             low=0,
             high=2,

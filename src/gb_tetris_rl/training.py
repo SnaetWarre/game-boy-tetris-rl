@@ -10,6 +10,7 @@ def train_dqn_agent(
     total_timesteps: int,
     seed: int,
     device: str,
+    show_window: bool = False,
 ) -> Path:
     try:
         from stable_baselines3 import DQN
@@ -32,18 +33,22 @@ def train_dqn_agent(
     finally:
         environment.close()
 
-    monitored_environment = Monitor(TetrisEnvironment(rom_path))
+    training_render_mode = "human" if show_window else None
+    monitored_environment = Monitor(
+        TetrisEnvironment(rom_path, render_mode=training_render_mode)
+    )
     checkpoint_callback = CheckpointCallback(
         save_freq=50_000,
         save_path=str(checkpoint_directory),
         name_prefix="tetris-dqn",
     )
+    replay_warmup_steps = min(10_000, max(100, total_timesteps // 10))
     model = DQN(
         "MlpPolicy",
         monitored_environment,
         learning_rate=1e-4,
         buffer_size=100_000,
-        learning_starts=10_000,
+        learning_starts=replay_warmup_steps,
         batch_size=128,
         gamma=0.99,
         train_freq=4,

@@ -6,9 +6,10 @@ __pycache__/
 .ruff_cache/
 .coverage
 
-# Nintendo ROMs and emulator state must never be committed.
+# ROM binaries, debug symbols, and emulator state stay local.
 *.gb
 *.gbc
+*.sym
 *.ram
 *.rtc
 *.sav
