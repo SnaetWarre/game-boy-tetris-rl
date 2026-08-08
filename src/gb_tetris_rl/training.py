@@ -9,6 +9,7 @@ def _create_monitored_environment(
     *,
     render_mode: str | None,
     display_emulator_window: bool | None = None,
+    emulation_speed: int = 0,
 ):
     from stable_baselines3.common.monitor import Monitor
 
@@ -17,6 +18,7 @@ def _create_monitored_environment(
             rom_path,
             render_mode=render_mode,
             display_emulator_window=display_emulator_window,
+            emulation_speed=emulation_speed,
         )
     )
 
@@ -30,6 +32,7 @@ def train_dqn_agent(
     device: str,
     show_window: bool = False,
     environment_count: int = 1,
+    emulation_speed: int = 0,
 ) -> Path:
     if environment_count < 1:
         raise ValueError("environment_count must be at least 1")
@@ -60,6 +63,7 @@ def train_dqn_agent(
         training_environment = _create_monitored_environment(
             rom_path,
             render_mode=training_render_mode,
+            emulation_speed=emulation_speed,
         )
     else:
         shared_render_mode = "human" if show_window else None
@@ -69,6 +73,7 @@ def train_dqn_agent(
                 rom_path,
                 render_mode=shared_render_mode,
                 display_emulator_window=show_window and worker_index == 0,
+                emulation_speed=emulation_speed if worker_index == 0 else 0,
             )
             for worker_index in range(environment_count)
         ]

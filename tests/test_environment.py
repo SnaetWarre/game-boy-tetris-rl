@@ -97,6 +97,7 @@ class EnvironmentContractTests(unittest.TestCase):
                     rom_path,
                     render_mode="human",
                     display_emulator_window=False,
+                    emulation_speed=7,
                 )
                 try:
                     environment.step(TetrisAction.WAIT.value)
@@ -107,7 +108,7 @@ class EnvironmentContractTests(unittest.TestCase):
         self.assertIsNotNone(fake_pyboy)
         assert fake_pyboy is not None
         self.assertEqual(fake_pyboy.window, "null")
-        self.assertEqual(fake_pyboy.emulation_speed, 0)
+        self.assertEqual(fake_pyboy.emulation_speed, 7)
         self.assertFalse(fake_pyboy.rendered)
 
     def test_reset_and_step_follow_the_gymnasium_contract(self) -> None:

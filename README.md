@@ -64,6 +64,7 @@ gb-tetris-rl train \
   --output models/tetris-dqn \
   --device cuda \
   --envs 4 \
+  --speed 0 \
   --window
 ```
 
@@ -73,6 +74,8 @@ actual emulator continuously at normal Game Boy speed while the CUDA-backed
 network trains. `--envs 4` runs four independent PyBoy processes, displays the
 first one, and batches their experience into the shared CUDA policy. This is
 more useful than putting the instruction-dependent Game Boy CPU loop on a GPU.
+`--speed 0` keeps drawing the visible worker without applying the normal 60 FPS
+frame limiter; use `--speed 1` when you want human-speed playback while training.
 Checkpoints are written beside the final model.
 
 The first useful milestone is not "perfect Tetris." It is beating the random

@@ -45,6 +45,12 @@ def build_argument_parser() -> argparse.ArgumentParser:
         help="parallel PyBoy processes feeding the shared policy",
     )
     train_parser.add_argument(
+        "--speed",
+        type=_nonnegative_integer,
+        default=0,
+        help="visible emulator speed multiplier; 0 removes the frame limiter",
+    )
+    train_parser.add_argument(
         "--window",
         action="store_true",
         help="show the emulator continuously while the agent trains (slower)",
@@ -105,6 +111,13 @@ def _positive_integer(raw_value: str) -> int:
     parsed_value = int(raw_value)
     if parsed_value < 1:
         raise argparse.ArgumentTypeError("value must be at least 1")
+    return parsed_value
+
+
+def _nonnegative_integer(raw_value: str) -> int:
+    parsed_value = int(raw_value)
+    if parsed_value < 0:
+        raise argparse.ArgumentTypeError("value cannot be negative")
     return parsed_value
 
 
@@ -189,6 +202,7 @@ def _run_training(arguments: argparse.Namespace) -> None:
         device=arguments.device,
         show_window=arguments.window,
         environment_count=arguments.envs,
+        emulation_speed=arguments.speed,
     )
     print(f"Saved model: {saved_model_path}")
 

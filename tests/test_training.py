@@ -18,10 +18,12 @@ class TinyTrainingEnvironment(gym.Env):
         *,
         render_mode: str | None = None,
         display_emulator_window: bool | None = None,
+        emulation_speed: int = 0,
     ) -> None:
         del rom_path
         del render_mode
         del display_emulator_window
+        del emulation_speed
         self.action_space = spaces.Discrete(7)
         self.observation_space = spaces.Box(
             low=0,

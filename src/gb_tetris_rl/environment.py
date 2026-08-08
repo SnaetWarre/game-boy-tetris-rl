@@ -26,6 +26,7 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         *,
         render_mode: str | None = None,
         display_emulator_window: bool | None = None,
+        emulation_speed: int | None = None,
         frames_per_action: int = 2,
         maximum_episode_steps: int = 20_000,
     ) -> None:
@@ -41,6 +42,10 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
             display_emulator_window = render_mode == "human"
         if display_emulator_window and render_mode != "human":
             raise ValueError("display_emulator_window requires render_mode='human'")
+        if emulation_speed is None:
+            emulation_speed = 1 if display_emulator_window else 0
+        if emulation_speed < 0:
+            raise ValueError("emulation_speed cannot be negative")
 
         validated_rom = validate_tetris_rom(rom_path)
         window_backend = "SDL2" if display_emulator_window else "null"
@@ -52,7 +57,7 @@ class TetrisEnvironment(gym.Env[NDArray[np.uint8], int]):
         if symbols_path.is_file():
             pyboy_options["symbols"] = str(symbols_path)
         self._pyboy = PyBoy(str(validated_rom.path), **pyboy_options)
-        self._pyboy.set_emulation_speed(1 if display_emulator_window else 0)
+        self._pyboy.set_emulation_speed(emulation_speed)
         self._game_adapter = create_game_adapter(validated_rom.game, self._pyboy)
 
         self.render_mode = render_mode
