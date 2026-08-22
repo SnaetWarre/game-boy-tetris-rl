@@ -27,21 +27,20 @@ assembly source and `.sym` file.
 
 ## Setup
 
-The project is tested with Python 3.14 and PyTorch's CUDA 13 runtime:
+The project is tested with Python 3.14 and PyTorch's CUDA 13 runtime. Install
+[`uv`](https://docs.astral.sh/uv/getting-started/installation/), then create the
+locked project environment with all training, recording, and development
+dependencies:
 
 ```sh
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install 'torch==2.13.0'
-python -m pip install -e '.[train,record,dev]'
+uv sync --all-extras
 ```
 
 Fetch the open-source homebrew and verify the complete setup:
 
 ```sh
-gb-tetris-rl bootstrap
-gb-tetris-rl doctor --rom roms/PandorasBlocks.gbc
+uv run gb-tetris-rl bootstrap
+uv run gb-tetris-rl doctor --rom roms/PandorasBlocks.gbc
 ```
 
 ## Try the environment
@@ -50,7 +49,7 @@ Run a short random-policy episode first. This verifies input, observations,
 rewards, and resets without beginning a long training run.
 
 ```sh
-gb-tetris-rl random --rom roms/PandorasBlocks.gbc --steps 2000
+uv run gb-tetris-rl random --rom roms/PandorasBlocks.gbc --steps 2000
 ```
 
 Add `--window` to watch the emulator at normal speed.
@@ -58,7 +57,7 @@ Add `--window` to watch the emulator at normal speed.
 ## Train
 
 ```sh
-gb-tetris-rl train \
+uv run gb-tetris-rl train \
   --rom roms/PandorasBlocks.gbc \
   --controls placements \
   --expert-samples 50000 \
@@ -83,7 +82,7 @@ policy on mean lines cleared over the same deterministic episode seeds.
 ## Watch or record the agent
 
 ```sh
-gb-tetris-rl watch \
+uv run gb-tetris-rl watch \
   --rom roms/PandorasBlocks.gbc \
   --model models/tetris-dqn-expert.zip \
   --controls placements \
@@ -104,7 +103,7 @@ models remain loadable: 202 inputs include the held-piece one-hot state, and 80
 actions represent 40 direct placements plus 40 hold-then-place decisions.
 
 ```sh
-gb-tetris-rl heuristic \
+uv run gb-tetris-rl heuristic \
   --rom roms/PandorasBlocks.gbc \
   --hold \
   --forever \
@@ -120,7 +119,7 @@ visible; use `--speed 0` for unlimited emulation speed.
 To validate the emulator controls and counters without any neural model:
 
 ```sh
-gb-tetris-rl heuristic \
+uv run gb-tetris-rl heuristic \
   --rom roms/PandorasBlocks.gbc \
   --target-lines 40 \
   --seed 0
