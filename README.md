@@ -1,5 +1,7 @@
 # Game Boy Tetris RL
 
+[![CI](https://github.com/SnaetWarre/game-boy-tetris-rl/actions/workflows/ci.yml/badge.svg)](https://github.com/SnaetWarre/game-boy-tetris-rl/actions/workflows/ci.yml)
+
 A small reinforcement-learning project that trains one hold-aware DQN policy
 to play [Pandora's Blocks](https://github.com/Villadelfia/dmgtris), an
 open-source Game Boy falling-block game, through
