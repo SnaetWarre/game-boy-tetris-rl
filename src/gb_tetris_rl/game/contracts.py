@@ -44,6 +44,13 @@ class PlacementDecision:
     uses_hold: bool
 
 
+@dataclass(frozen=True)
+class PieceContext:
+    current_piece: int
+    next_piece: int
+    held_piece: int
+
+
 def decode_agent_action(agent_action: int) -> PlacementDecision:
     if not 0 <= agent_action < AGENT_ACTION_COUNT:
         raise ValueError(f"agent action must be between 0 and {AGENT_ACTION_COUNT - 1}")
@@ -90,6 +97,31 @@ def board_from_observation(observation: AgentObservation) -> Board:
             f"expected observation shape {AGENT_OBSERVATION_SHAPE}, received {observation.shape}"
         )
     return observation[:BOARD_CELL_COUNT].reshape(BOARD_SHAPE)
+
+
+def piece_context_from_observation(observation: AgentObservation) -> PieceContext:
+    if observation.shape != AGENT_OBSERVATION_SHAPE:
+        raise ValueError(
+            f"expected observation shape {AGENT_OBSERVATION_SHAPE}, received {observation.shape}"
+        )
+
+    current_piece_values = observation[BOARD_CELL_COUNT : BOARD_CELL_COUNT + TETROMINO_TYPE_COUNT]
+    next_piece_start = BOARD_CELL_COUNT + TETROMINO_TYPE_COUNT
+    next_piece_values = observation[next_piece_start : next_piece_start + TETROMINO_TYPE_COUNT]
+    held_piece_values = observation[next_piece_start + TETROMINO_TYPE_COUNT :]
+    for context_name, encoded_values in (
+        ("current piece", current_piece_values),
+        ("next piece", next_piece_values),
+        ("held piece", held_piece_values),
+    ):
+        if np.count_nonzero(encoded_values) != 1:
+            raise ValueError(f"observation must encode exactly one {context_name}")
+
+    return PieceContext(
+        current_piece=int(np.argmax(current_piece_values)),
+        next_piece=int(np.argmax(next_piece_values)),
+        held_piece=int(np.argmax(held_piece_values)),
+    )
 
 
 def _validate_piece_type(piece_type: int, role: str, *, allow_empty: bool) -> None:

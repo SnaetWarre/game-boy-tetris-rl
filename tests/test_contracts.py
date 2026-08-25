@@ -11,6 +11,7 @@ from gb_tetris_rl.game.contracts import (
     board_from_observation,
     decode_agent_action,
     encode_agent_observation,
+    piece_context_from_observation,
 )
 
 
@@ -37,6 +38,16 @@ class AgentContractTests(unittest.TestCase):
         self.assertEqual(int(observation[:BOARD_CELL_COUNT].sum()), 1)
         self.assertEqual(int(observation[BOARD_CELL_COUNT:].sum()), 3)
         np.testing.assert_array_equal(board_from_observation(observation), board)
+        piece_context = piece_context_from_observation(observation)
+        self.assertEqual(piece_context.current_piece, 1)
+        self.assertEqual(piece_context.next_piece, 4)
+        self.assertEqual(piece_context.held_piece, EMPTY_HOLD_SLOT)
+
+    def test_rejects_observation_without_piece_context(self) -> None:
+        invalid_observation = np.zeros(AGENT_OBSERVATION_SHAPE, dtype=np.uint8)
+
+        with self.assertRaisesRegex(ValueError, "exactly one current piece"):
+            piece_context_from_observation(invalid_observation)
 
 
 if __name__ == "__main__":

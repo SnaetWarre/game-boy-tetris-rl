@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
+from gb_tetris_rl.agent.action_masks import canonical_agent_action_masks
 from gb_tetris_rl.agent.planner import choose_agent_action, enumerate_placements
 from gb_tetris_rl.game.contracts import (
     AGENT_OBSERVATION_SHAPE,
@@ -31,7 +32,8 @@ def generate_planner_demonstrations(
     sample_count: int,
     *,
     seed: int,
-    maximum_episode_pieces: int = 40,
+    maximum_episode_pieces: int = 200,
+    use_lookahead: bool = False,
 ) -> DemonstrationDataset:
     """Generate synthetic boards labelled by the deterministic planner."""
     if sample_count < 1:
@@ -68,7 +70,7 @@ def generate_planner_demonstrations(
             current_piece,
             next_piece,
             held_piece,
-            use_lookahead=False,
+            use_lookahead=use_lookahead,
         )
         agent_actions[sample_index] = planner_action
 
@@ -144,6 +146,15 @@ def pretrain_policy_from_demonstrations(
                 device=dqn_agent.device,
             )
             predicted_action_values = dqn_agent.q_net(observation_batch)
+            if getattr(dqn_agent.policy, "uses_canonical_action_masks", False):
+                valid_action_masks = canonical_agent_action_masks(
+                    demonstration_dataset.observations[batch_indices]
+                )
+                valid_action_mask_tensor = torch.as_tensor(
+                    valid_action_masks,
+                    device=dqn_agent.device,
+                )
+                predicted_action_values.masked_fill_(~valid_action_mask_tensor, -torch.inf)
             classification_loss = torch_functional.cross_entropy(
                 predicted_action_values,
                 action_batch,
@@ -169,7 +180,20 @@ def pretrain_policy_from_demonstrations(
             demonstration_dataset.agent_actions[validation_indices],
             device=dqn_agent.device,
         )
-        predicted_validation_actions = dqn_agent.q_net(validation_observations).argmax(dim=1)
+        validation_action_values = dqn_agent.q_net(validation_observations)
+        if getattr(dqn_agent.policy, "uses_canonical_action_masks", False):
+            validation_action_masks = canonical_agent_action_masks(
+                demonstration_dataset.observations[validation_indices]
+            )
+            validation_action_mask_tensor = torch.as_tensor(
+                validation_action_masks,
+                device=dqn_agent.device,
+            )
+            validation_action_values.masked_fill_(
+                ~validation_action_mask_tensor,
+                -torch.inf,
+            )
+        predicted_validation_actions = validation_action_values.argmax(dim=1)
         validation_accuracy = float(
             (predicted_validation_actions == validation_actions).float().mean().cpu()
         )

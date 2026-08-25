@@ -1,7 +1,11 @@
 import argparse
 from importlib.metadata import PackageNotFoundError, version
 
-from gb_tetris_rl.agent.evaluation import EpisodeSummary, evaluate_agent
+from gb_tetris_rl.agent.evaluation import (
+    EpisodeSummary,
+    evaluate_agent,
+    write_evaluation_report,
+)
 from gb_tetris_rl.agent.planner import choose_agent_action
 from gb_tetris_rl.agent.training import TrainingConfig, train_agent
 from gb_tetris_rl.game.contracts import DIRECT_PLACEMENT_ACTION_COUNT, board_from_observation
@@ -111,15 +115,19 @@ def run_train_command(command_arguments: argparse.Namespace) -> None:
     )
     if training_artifacts.imitation_model_path is not None:
         print(f"Imitation model: {training_artifacts.imitation_model_path}")
-    print(f"DQN model: {training_artifacts.dqn_model_path}")
+    if training_artifacts.dqn_model_path is not None:
+        print(f"DQN model: {training_artifacts.dqn_model_path}")
 
 
 def run_evaluate_command(command_arguments: argparse.Namespace) -> None:
-    evaluation_mode = (
-        "learned policy + planner safety"
-        if command_arguments.planner_safety
-        else "learned policy only"
-    )
+    if command_arguments.planner_safety and command_arguments.planner_override:
+        raise ValueError("--planner-safety and --planner-override are mutually exclusive")
+    if command_arguments.planner_override:
+        evaluation_mode = "learned policy + planner override"
+    elif command_arguments.planner_safety:
+        evaluation_mode = "learned policy + planner safety"
+    else:
+        evaluation_mode = "learned policy only"
     print(f"Evaluation mode: {evaluation_mode}")
     episode_summaries = evaluate_agent(
         command_arguments.rom,
@@ -128,27 +136,41 @@ def run_evaluate_command(command_arguments: argparse.Namespace) -> None:
         show_window=command_arguments.window,
         seed=command_arguments.seed,
         use_planner_safety=command_arguments.planner_safety,
+        use_planner_override=command_arguments.planner_override,
         target_lines=command_arguments.target_lines,
         recording_path=command_arguments.record,
         capture_every_n_steps=command_arguments.record_every,
     )
     _print_episode_summaries(episode_summaries)
+    if command_arguments.report is not None:
+        saved_report_path = write_evaluation_report(
+            episode_summaries,
+            command_arguments.report,
+            model_path=command_arguments.model,
+            starting_seed=command_arguments.seed,
+            evaluation_mode=evaluation_mode,
+        )
+        print(f"Saved evaluation report: {saved_report_path}")
     if command_arguments.record is not None:
         print(f"Saved recording: {command_arguments.record.expanduser().resolve()}")
 
 
 def run_demo_command(command_arguments: argparse.Namespace) -> None:
-    uses_planner_safety = not command_arguments.neural_only
-    demo_mode = "learned policy + planner safety" if uses_planner_safety else "learned policy only"
+    uses_planner_override = not command_arguments.neural_only
+    demo_mode = (
+        "learned policy + explicit planner override"
+        if uses_planner_override
+        else "learned policy only"
+    )
     print(f"Demo mode: {demo_mode}")
-    print("The planner can replace unsafe neural actions; interventions are reported.")
+    print("Every planner disagreement is reported; override mode follows the planner.")
     episode_summaries = evaluate_agent(
         command_arguments.rom,
         command_arguments.model,
         episode_count=1,
         show_window=not command_arguments.headless,
         seed=command_arguments.seed,
-        use_planner_safety=uses_planner_safety,
+        use_planner_override=uses_planner_override,
         target_lines=None if command_arguments.forever else command_arguments.target_lines,
         play_forever=command_arguments.forever,
     )
@@ -162,5 +184,6 @@ def _print_episode_summaries(episode_summaries: list[EpisodeSummary]) -> None:
             f"lines={episode_summary.cleared_lines}, "
             f"pieces={episode_summary.episode_steps}, "
             f"holds={episode_summary.hold_actions}, "
-            f"planner_interventions={episode_summary.planner_interventions}"
+            f"planner_disagreements={episode_summary.planner_disagreements}, "
+            f"planner_rescues={episode_summary.planner_rescues}"
         )

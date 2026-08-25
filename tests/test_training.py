@@ -73,6 +73,7 @@ class TrainingSmokeTests(unittest.TestCase):
                 training_artifacts.dqn_model_path,
                 run_directory.resolve() / "dqn-final.zip",
             )
+            self.assertIsNotNone(training_artifacts.dqn_model_path)
             self.assertTrue(training_artifacts.dqn_model_path.is_file())
 
     def test_rejects_zero_parallel_environments(self) -> None:
@@ -83,6 +84,16 @@ class TrainingSmokeTests(unittest.TestCase):
             imitation_epoch_count=0,
         )
         with self.assertRaisesRegex(ValueError, "environment_count"):
+            train_agent("unused.gbc", "unused-run", invalid_config)
+
+    def test_rejects_configuration_with_both_training_stages_disabled(self) -> None:
+        invalid_config = TrainingConfig(
+            total_timesteps=0,
+            demonstration_count=0,
+            imitation_epoch_count=0,
+        )
+
+        with self.assertRaisesRegex(ValueError, "at least one training stage"):
             train_agent("unused.gbc", "unused-run", invalid_config)
 
 

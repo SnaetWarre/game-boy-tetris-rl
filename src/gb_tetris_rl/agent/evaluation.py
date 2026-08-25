@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 from itertools import count
 from pathlib import Path
@@ -5,13 +6,15 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from gb_tetris_rl.agent.planner import choose_agent_action
+from gb_tetris_rl.agent.planner import choose_agent_action, enumerate_placements
 from gb_tetris_rl.game.contracts import (
     AGENT_ACTION_COUNT,
     AGENT_OBSERVATION_SHAPE,
     DIRECT_PLACEMENT_ACTION_COUNT,
+    EMPTY_HOLD_SLOT,
     EpisodeInfo,
     board_from_observation,
+    decode_agent_action,
 )
 from gb_tetris_rl.game.environment import TetrisEnvironment
 
@@ -22,7 +25,8 @@ class EpisodeSummary:
     cleared_lines: int
     episode_steps: int
     hold_actions: int
-    planner_interventions: int
+    planner_disagreements: int
+    planner_rescues: int
 
 
 def evaluate_agent(
@@ -33,6 +37,7 @@ def evaluate_agent(
     show_window: bool,
     seed: int,
     use_planner_safety: bool = False,
+    use_planner_override: bool = False,
     target_lines: int | None = None,
     play_forever: bool = False,
     recording_path: str | Path | None = None,
@@ -45,6 +50,8 @@ def evaluate_agent(
         raise ValueError("capture_every_n_steps must be at least 1")
     if target_lines is not None and target_lines < 1:
         raise ValueError("target_lines must be at least 1")
+    if use_planner_safety and use_planner_override:
+        raise ValueError("planner safety and planner override are mutually exclusive")
 
     dqn_agent = _load_compatible_agent(model_path)
     render_mode = "human" if show_window else "rgb_array" if recording_path else None
@@ -58,17 +65,25 @@ def evaluate_agent(
         for episode_index in episode_indices:
             observation, episode_info = environment.reset(seed=seed + episode_index)
             episode_step_count = 0
-            planner_intervention_count = 0
+            planner_disagreement_count = 0
+            planner_rescue_count = 0
             hold_action_count = 0
 
             while True:
                 predicted_action, _ = dqn_agent.predict(observation, deterministic=True)
                 selected_action = int(np.asarray(predicted_action).item())
-                if use_planner_safety:
+                if use_planner_safety or use_planner_override:
                     planner_action = _choose_safe_action(observation, episode_info)
                     if planner_action != selected_action:
-                        planner_intervention_count += 1
-                        selected_action = planner_action
+                        planner_disagreement_count += 1
+                        action_requires_rescue = _action_requires_planner_rescue(
+                            observation,
+                            episode_info,
+                            selected_action,
+                        )
+                        if use_planner_override or action_requires_rescue:
+                            planner_rescue_count += int(action_requires_rescue)
+                            selected_action = planner_action
 
                 if selected_action >= DIRECT_PLACEMENT_ACTION_COUNT:
                     hold_action_count += 1
@@ -97,7 +112,8 @@ def evaluate_agent(
             episode_summary = _summarize_episode(
                 episode_info,
                 hold_action_count,
-                planner_intervention_count,
+                planner_disagreement_count,
+                planner_rescue_count,
             )
             if play_forever:
                 episode_summaries[:] = [episode_summary]
@@ -145,18 +161,83 @@ def _choose_safe_action(observation, episode_info: EpisodeInfo) -> int:
     )
 
 
+def _action_requires_planner_rescue(
+    observation,
+    episode_info: EpisodeInfo,
+    proposed_action: int,
+) -> bool:
+    placement_decision = decode_agent_action(proposed_action)
+    direct_placement_action = proposed_action % DIRECT_PLACEMENT_ACTION_COUNT
+    piece_to_place = episode_info["current_piece"]
+    if placement_decision.uses_hold:
+        piece_to_place = (
+            episode_info["next_piece"]
+            if episode_info["held_piece"] == EMPTY_HOLD_SLOT
+            else episode_info["held_piece"]
+        )
+    matching_placements = [
+        placement
+        for placement in enumerate_placements(board_from_observation(observation), piece_to_place)
+        if placement.placement_action == direct_placement_action
+    ]
+    if not matching_placements:
+        return True
+    if placement_decision.uses_hold and episode_info["held_piece"] == EMPTY_HOLD_SLOT:
+        return False
+    return not enumerate_placements(matching_placements[0].board, episode_info["next_piece"])
+
+
 def _summarize_episode(
     episode_info: EpisodeInfo,
     hold_action_count: int,
-    planner_intervention_count: int,
+    planner_disagreement_count: int,
+    planner_rescue_count: int,
 ) -> EpisodeSummary:
     return EpisodeSummary(
         score=episode_info["score"],
         cleared_lines=episode_info["cleared_lines"],
         episode_steps=episode_info["episode_steps"],
         hold_actions=hold_action_count,
-        planner_interventions=planner_intervention_count,
+        planner_disagreements=planner_disagreement_count,
+        planner_rescues=planner_rescue_count,
     )
+
+
+def write_evaluation_report(
+    episode_summaries: list[EpisodeSummary],
+    report_path: str | Path,
+    *,
+    model_path: str | Path,
+    starting_seed: int,
+    evaluation_mode: str,
+) -> Path:
+    if not episode_summaries:
+        raise ValueError("cannot report an empty evaluation")
+    cleared_line_counts = np.asarray(
+        [episode.cleared_lines for episode in episode_summaries],
+        dtype=np.float64,
+    )
+    resolved_report_path = Path(report_path).expanduser().resolve()
+    resolved_report_path.parent.mkdir(parents=True, exist_ok=True)
+    report = {
+        "model": str(Path(model_path).expanduser().resolve()),
+        "mode": evaluation_mode,
+        "starting_seed": starting_seed,
+        "episode_count": len(episode_summaries),
+        "metrics": {
+            "mean_cleared_lines": float(cleared_line_counts.mean()),
+            "median_cleared_lines": float(np.median(cleared_line_counts)),
+            "minimum_cleared_lines": int(cleared_line_counts.min()),
+            "maximum_cleared_lines": int(cleared_line_counts.max()),
+            "total_planner_disagreements": sum(
+                episode.planner_disagreements for episode in episode_summaries
+            ),
+            "total_planner_rescues": sum(episode.planner_rescues for episode in episode_summaries),
+        },
+        "episodes": [episode.__dict__ for episode in episode_summaries],
+    }
+    resolved_report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    return resolved_report_path
 
 
 def _should_capture_frame(
