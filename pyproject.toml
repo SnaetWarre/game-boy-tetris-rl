@@ -13,15 +13,13 @@ authors = [{ name = "Warre Snaet" }]
 dependencies = [
   "gymnasium>=1.3,<2",
   "numpy>=2,<3",
+  "pillow>=11,<13",
   "pyboy==2.7.0",
-]
-
-[project.optional-dependencies]
-train = [
   "stable-baselines3>=2.9,<3",
   "torch==2.13.0",
 ]
-record = ["pillow>=11,<13"]
+
+[dependency-groups]
 dev = [
   "pytest>=8,<10",
   "ruff>=0.12,<1",

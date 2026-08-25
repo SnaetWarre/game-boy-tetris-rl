@@ -29,11 +29,10 @@ assembly source and `.sym` file.
 
 The project is tested with Python 3.14 and PyTorch's CUDA 13 runtime. Install
 [`uv`](https://docs.astral.sh/uv/getting-started/installation/), then create the
-locked project environment with all training, recording, and development
-dependencies:
+locked project environment:
 
 ```sh
-uv sync --all-extras
+uv sync
 ```
 
 Fetch the open-source homebrew and verify the complete setup:
