@@ -2,9 +2,9 @@ import unittest
 
 import numpy as np
 
-from gb_tetris_rl.heuristic import (
+from gb_tetris_rl.agent.planner import (
     PANDORAS_PIECE_ROTATIONS,
-    choose_hold_placement_action,
+    choose_agent_action,
     choose_placement_action,
     enumerate_placements,
     simulate_hard_drop,
@@ -39,22 +39,22 @@ class PlacementHeuristicTests(unittest.TestCase):
         board = np.zeros((18, 10), dtype=np.uint8)
         board[-1, :6] = 1
 
-        action = choose_placement_action(board, current_piece=0)
+        placement_action = choose_placement_action(board, current_piece=0)
 
-        self.assertEqual(action, 6)
+        self.assertEqual(placement_action, 6)
 
     def test_hold_planner_can_choose_the_held_piece(self) -> None:
         board = np.zeros((18, 10), dtype=np.uint8)
 
-        action = choose_hold_placement_action(
+        agent_action = choose_agent_action(
             board,
             current_piece=1,
             next_piece=0,
             held_piece=0,
         )
 
-        self.assertGreaterEqual(action, 40)
-        self.assertLess(action, 80)
+        self.assertGreaterEqual(agent_action, 40)
+        self.assertLess(agent_action, 80)
 
 
 if __name__ == "__main__":

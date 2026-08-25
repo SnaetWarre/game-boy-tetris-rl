@@ -1,172 +1,194 @@
 import argparse
-from importlib.metadata import PackageNotFoundError, version
+from collections.abc import Callable
 from pathlib import Path
+from typing import cast
 
-from gb_tetris_rl.roms import RomValidationError, validate_tetris_rom
+from gb_tetris_rl.commands import (
+    run_bootstrap_command,
+    run_demo_command,
+    run_doctor_command,
+    run_evaluate_command,
+    run_planner_command,
+    run_train_command,
+)
+from gb_tetris_rl.game.rom import RomValidationError
+
+DEFAULT_ROM_PATH = Path("roms/PandorasBlocks.gbc")
+DEFAULT_DEMO_MODEL_PATH = Path("models/demo-agent.zip")
+
+CommandRunner = Callable[[argparse.Namespace], None]
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="gb-tetris-rl",
-        description="Train and inspect a reinforcement-learning agent for Game Boy Tetris.",
+        description=(
+            "Train and evaluate one hold-aware DQN agent in the open-source Pandora's Blocks ROM."
+        ),
     )
     command_parsers = parser.add_subparsers(dest="command", required=True)
-
-    bootstrap_parser = command_parsers.add_parser(
-        "bootstrap", help="download the GPL Pandora's Blocks ROM and symbols"
-    )
-    bootstrap_parser.add_argument(
-        "--output-dir", type=Path, default=Path("roms"), help="download directory"
-    )
-
-    doctor_parser = command_parsers.add_parser(
-        "doctor", help="validate the ROM, dependencies, and one environment transition"
-    )
-    _add_rom_argument(doctor_parser)
-
-    random_parser = command_parsers.add_parser(
-        "random", help="run a random policy as an environment smoke test"
-    )
-    _add_rom_argument(random_parser)
-    random_parser.add_argument("--steps", type=_positive_integer, default=2_000)
-    random_parser.add_argument("--seed", type=int, default=0)
-    random_parser.add_argument("--window", action="store_true")
-    random_parser.add_argument("--controls", choices=_CONTROL_MODES, default="buttons")
-
-    heuristic_parser = command_parsers.add_parser(
-        "heuristic", help="play with a deterministic two-piece placement planner"
-    )
-    _add_rom_argument(heuristic_parser)
-    heuristic_parser.add_argument("--target-lines", type=_positive_integer, default=5)
-    heuristic_parser.add_argument("--maximum-pieces", type=_positive_integer, default=2_000)
-    heuristic_parser.add_argument("--seed", type=int, default=0)
-    heuristic_parser.add_argument("--window", action="store_true")
-    heuristic_parser.add_argument("--hold", action="store_true")
-    heuristic_parser.add_argument("--forever", action="store_true")
-    heuristic_parser.add_argument(
-        "--speed",
-        type=_nonnegative_integer,
-        default=1,
-        help="visible emulator speed multiplier; 0 removes the frame limiter",
-    )
-
-    train_parser = command_parsers.add_parser("train", help="train a DQN agent")
-    _add_rom_argument(train_parser)
-    train_parser.add_argument("--timesteps", type=_positive_integer, default=250_000)
-    train_parser.add_argument("--output", type=Path, default=Path("models/tetris-dqn"))
-    train_parser.add_argument("--seed", type=int, default=0)
-    train_parser.add_argument("--device", default="auto")
-    train_parser.add_argument("--controls", choices=_CONTROL_MODES, default="placements")
-    train_parser.add_argument(
-        "--envs",
-        type=_positive_integer,
-        default=4,
-        help="parallel PyBoy processes feeding the shared policy",
-    )
-    train_parser.add_argument(
-        "--speed",
-        type=_nonnegative_integer,
-        default=0,
-        help="visible emulator speed multiplier; 0 removes the frame limiter",
-    )
-    train_parser.add_argument(
-        "--window",
-        action="store_true",
-        help="show the emulator continuously while the agent trains (slower)",
-    )
-    train_parser.add_argument(
-        "--expert-samples",
-        type=_nonnegative_integer,
-        default=0,
-        help="bootstrap placement DQN from this many heuristic demonstrations",
-    )
-    train_parser.add_argument(
-        "--expert-epochs",
-        type=_nonnegative_integer,
-        default=0,
-        help="CUDA classification passes over heuristic demonstrations",
-    )
-
-    watch_parser = command_parsers.add_parser(
-        "watch", help="evaluate a trained model and optionally record a GIF"
-    )
-    _add_rom_argument(watch_parser)
-    watch_parser.add_argument("--model", type=Path, required=True)
-    watch_parser.add_argument("--episodes", type=_positive_integer, default=3)
-    watch_parser.add_argument("--record", type=Path)
-    watch_parser.add_argument(
-        "--record-every",
-        type=_positive_integer,
-        default=2,
-        help="capture one GIF frame after this many agent actions",
-    )
-    watch_parser.add_argument("--seed", type=int, default=10_000)
-    watch_parser.add_argument("--window", action="store_true")
-    watch_parser.add_argument("--controls", choices=_CONTROL_MODES, default="placements")
-    watch_parser.add_argument(
-        "--expert-safety",
-        action="store_true",
-        help="replace weak neural placements with the deterministic afterstate planner",
-    )
-    watch_parser.add_argument(
-        "--target-lines",
-        type=_positive_integer,
-        help="finish each playback episode after this many cleared lines",
-    )
-    watch_parser.add_argument(
-        "--forever",
-        action="store_true",
-        help="automatically start another game after every top-out",
-    )
-
+    _add_bootstrap_command(command_parsers)
+    _add_doctor_command(command_parsers)
+    _add_demo_command(command_parsers)
+    _add_planner_command(command_parsers)
+    _add_train_command(command_parsers)
+    _add_evaluate_command(command_parsers)
     return parser
 
 
 def main() -> None:
     parser = build_argument_parser()
-    arguments = parser.parse_args()
+    command_arguments = parser.parse_args()
+    command_runner = cast(CommandRunner, command_arguments.command_runner)
     try:
-        if arguments.command == "bootstrap":
-            _run_bootstrap(arguments.output_dir)
-        elif arguments.command == "doctor":
-            _run_doctor(arguments.rom)
-        elif arguments.command == "random":
-            _run_random_policy(
-                arguments.rom,
-                maximum_steps=arguments.steps,
-                seed=arguments.seed,
-                show_window=arguments.window,
-                control_mode=arguments.controls,
-            )
-        elif arguments.command == "heuristic":
-            _run_heuristic_policy(
-                arguments.rom,
-                target_lines=arguments.target_lines,
-                maximum_pieces=arguments.maximum_pieces,
-                seed=arguments.seed,
-                show_window=arguments.window,
-                use_hold=arguments.hold,
-                play_forever=arguments.forever,
-                emulation_speed=arguments.speed,
-            )
-        elif arguments.command == "train":
-            _run_training(arguments)
-        elif arguments.command == "watch":
-            _run_playback(arguments)
+        command_runner(command_arguments)
+    except KeyboardInterrupt:
+        print("\nStopped.")
     except (RomValidationError, RuntimeError, ValueError) as command_error:
         parser.exit(status=2, message=f"error: {command_error}\n")
 
 
-def _add_rom_argument(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
+def _add_bootstrap_command(command_parsers) -> None:
+    bootstrap_parser = command_parsers.add_parser(
+        "bootstrap",
+        help="download the checksum-pinned GPL ROM and symbols",
+    )
+    bootstrap_parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("roms"),
+        help="download directory (default: roms)",
+    )
+    bootstrap_parser.set_defaults(command_runner=run_bootstrap_command)
+
+
+def _add_doctor_command(command_parsers) -> None:
+    doctor_parser = command_parsers.add_parser(
+        "doctor",
+        help="validate dependencies, ROM state, and one environment transition",
+    )
+    _add_rom_argument(doctor_parser)
+    doctor_parser.set_defaults(command_runner=run_doctor_command)
+
+
+def _add_demo_command(command_parsers) -> None:
+    demo_parser = command_parsers.add_parser(
+        "demo",
+        help="run the canonical hold-aware model with an honest safety overlay",
+    )
+    _add_rom_argument(demo_parser)
+    demo_parser.add_argument(
+        "--model",
+        type=Path,
+        default=DEFAULT_DEMO_MODEL_PATH,
+        help=f"model checkpoint (default: {DEFAULT_DEMO_MODEL_PATH})",
+    )
+    demo_parser.add_argument("--target-lines", type=_positive_integer, default=40)
+    demo_parser.add_argument("--seed", type=int, default=10_000)
+    demo_parser.add_argument(
+        "--neural-only",
+        action="store_true",
+        help="disable planner interventions and show only learned policy performance",
+    )
+    demo_parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="do not open the emulator window",
+    )
+    demo_parser.add_argument(
+        "--forever",
+        action="store_true",
+        help="start a new seeded game after every top-out until interrupted",
+    )
+    demo_parser.set_defaults(command_runner=run_demo_command)
+
+
+def _add_planner_command(command_parsers) -> None:
+    planner_parser = command_parsers.add_parser(
+        "planner",
+        help="run the deterministic planner without a neural model",
+    )
+    _add_rom_argument(planner_parser)
+    planner_parser.add_argument("--target-lines", type=_positive_integer, default=40)
+    planner_parser.add_argument("--maximum-pieces", type=_positive_integer, default=2_000)
+    planner_parser.add_argument("--seed", type=int, default=0)
+    planner_parser.add_argument("--window", action="store_true")
+    planner_parser.add_argument("--forever", action="store_true")
+    planner_parser.add_argument(
+        "--speed",
+        type=_nonnegative_integer,
+        default=1,
+        help="visible emulator speed multiplier; 0 removes the frame limiter",
+    )
+    planner_parser.set_defaults(command_runner=run_planner_command)
+
+
+def _add_train_command(command_parsers) -> None:
+    train_parser = command_parsers.add_parser(
+        "train",
+        help="run planner imitation followed by DQN fine-tuning",
+    )
+    _add_rom_argument(train_parser)
+    train_parser.add_argument("--run-dir", type=Path, default=Path("models/runs/latest"))
+    train_parser.add_argument("--timesteps", type=_positive_integer, default=50_000)
+    train_parser.add_argument("--demonstrations", type=_nonnegative_integer, default=50_000)
+    train_parser.add_argument("--imitation-epochs", type=_nonnegative_integer, default=80)
+    train_parser.add_argument("--seed", type=int, default=0)
+    train_parser.add_argument("--device", default="auto")
+    train_parser.add_argument(
+        "--envs",
+        type=_positive_integer,
+        default=4,
+        help="parallel PyBoy workers feeding the shared DQN",
+    )
+    train_parser.add_argument("--window", action="store_true")
+    train_parser.add_argument(
+        "--speed",
+        type=_nonnegative_integer,
+        default=0,
+        help="visible worker speed; 0 removes the frame limiter",
+    )
+    train_parser.set_defaults(command_runner=run_train_command)
+
+
+def _add_evaluate_command(command_parsers) -> None:
+    evaluate_parser = command_parsers.add_parser(
+        "evaluate",
+        help="measure a model with or without planner interventions",
+    )
+    _add_rom_argument(evaluate_parser)
+    evaluate_parser.add_argument(
+        "--model",
+        type=Path,
+        default=DEFAULT_DEMO_MODEL_PATH,
+        help=f"model checkpoint (default: {DEFAULT_DEMO_MODEL_PATH})",
+    )
+    evaluate_parser.add_argument("--episodes", type=_positive_integer, default=5)
+    evaluate_parser.add_argument("--seed", type=int, default=10_000)
+    evaluate_parser.add_argument("--target-lines", type=_positive_integer)
+    evaluate_parser.add_argument("--window", action="store_true")
+    evaluate_parser.add_argument(
+        "--planner-safety",
+        action="store_true",
+        help="replace neural actions when the planner disagrees",
+    )
+    evaluate_parser.add_argument("--record", type=Path)
+    evaluate_parser.add_argument(
+        "--record-every",
+        type=_positive_integer,
+        default=2,
+        help="capture one GIF frame after this many placements",
+    )
+    evaluate_parser.set_defaults(command_runner=run_evaluate_command)
+
+
+def _add_rom_argument(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
         "--rom",
         type=Path,
-        required=True,
-        help="path to a legally supplied Game Boy Tetris ROM",
+        default=DEFAULT_ROM_PATH,
+        help=f"Pandora's Blocks ROM (default: {DEFAULT_ROM_PATH})",
     )
-
-
-_CONTROL_MODES = ("buttons", "placements", "placements-hold")
 
 
 def _positive_integer(raw_value: str) -> int:
@@ -181,199 +203,6 @@ def _nonnegative_integer(raw_value: str) -> int:
     if parsed_value < 0:
         raise argparse.ArgumentTypeError("value cannot be negative")
     return parsed_value
-
-
-def _run_doctor(rom_path: Path) -> None:
-    validated_rom = validate_tetris_rom(rom_path)
-    print(f"ROM: {validated_rom.path}")
-    print(f"Cartridge title: {validated_rom.cartridge_title}")
-    for package_name in ("pyboy", "gymnasium", "numpy", "stable-baselines3"):
-        try:
-            installed_version = version(package_name)
-        except PackageNotFoundError:
-            installed_version = "not installed (optional for stable-baselines3)"
-        print(f"{package_name}: {installed_version}")
-
-    try:
-        import torch
-
-        print(f"torch: {torch.__version__}")
-        print(f"CUDA available: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            print(f"CUDA device: {torch.cuda.get_device_name(0)}")
-    except ImportError:
-        print("torch: not installed (required for training)")
-
-    from gb_tetris_rl.environment import TetrisEnvironment
-
-    environment = TetrisEnvironment(validated_rom.path)
-    try:
-        observation, initial_info = environment.reset(seed=0)
-        _, reward, terminated, truncated, transition_info = environment.step(0)
-    finally:
-        environment.close()
-    print(f"Observation: shape={observation.shape}, dtype={observation.dtype}")
-    print(f"Initial state: {initial_info}")
-    print(
-        "Transition: "
-        f"reward={reward:.4f}, terminated={terminated}, truncated={truncated}, "
-        f"state={transition_info}"
-    )
-
-
-def _run_random_policy(
-    rom_path: Path,
-    *,
-    maximum_steps: int,
-    seed: int,
-    show_window: bool,
-    control_mode: str,
-) -> None:
-    from gb_tetris_rl.environment import TetrisEnvironment
-
-    render_mode = "human" if show_window else None
-    environment = TetrisEnvironment(
-        rom_path,
-        render_mode=render_mode,
-        control_mode=control_mode,
-    )
-    total_reward = 0.0
-    completed_steps = 0
-    try:
-        _, episode_info = environment.reset(seed=seed)
-        for _ in range(maximum_steps):
-            action = environment.action_space.sample()
-            _, reward, terminated, truncated, episode_info = environment.step(action)
-            total_reward += reward
-            completed_steps += 1
-            if terminated or truncated:
-                break
-    finally:
-        environment.close()
-
-    print(
-        f"Random policy: steps={completed_steps}, reward={total_reward:.3f}, "
-        f"score={episode_info['score']}, lines={episode_info['cleared_lines']}, "
-        f"holes={episode_info['holes']}"
-    )
-
-
-def _run_training(arguments: argparse.Namespace) -> None:
-    from gb_tetris_rl.training import train_dqn_agent
-
-    saved_model_path = train_dqn_agent(
-        arguments.rom,
-        arguments.output,
-        total_timesteps=arguments.timesteps,
-        seed=arguments.seed,
-        device=arguments.device,
-        show_window=arguments.window,
-        environment_count=arguments.envs,
-        emulation_speed=arguments.speed,
-        control_mode=arguments.controls,
-        expert_sample_count=arguments.expert_samples,
-        expert_epoch_count=arguments.expert_epochs,
-    )
-    print(f"Saved model: {saved_model_path}")
-
-
-def _run_heuristic_policy(
-    rom_path: Path,
-    *,
-    target_lines: int,
-    maximum_pieces: int,
-    seed: int,
-    show_window: bool,
-    use_hold: bool,
-    play_forever: bool,
-    emulation_speed: int,
-) -> None:
-    from gb_tetris_rl.environment import TETRIS_OBSERVATION_SHAPE, TetrisEnvironment
-    from gb_tetris_rl.heuristic import choose_hold_placement_action, choose_placement_action
-
-    environment = TetrisEnvironment(
-        rom_path,
-        render_mode="human" if show_window else None,
-        emulation_speed=emulation_speed if show_window else 0,
-        control_mode="placements-hold" if use_hold else "placements",
-    )
-    completed_episode_count = 0
-    hold_action_count = 0
-    try:
-        while True:
-            observation, episode_info = environment.reset(
-                seed=seed + completed_episode_count
-            )
-            for _ in range(maximum_pieces):
-                board = observation[: TETRIS_OBSERVATION_SHAPE[0]].reshape(18, 10)
-                if use_hold:
-                    action = choose_hold_placement_action(
-                        board,
-                        episode_info["current_piece"],
-                        episode_info["next_piece"],
-                        episode_info["held_piece"],
-                    )
-                    hold_action_count += int(action >= 40)
-                else:
-                    action = choose_placement_action(
-                        board,
-                        episode_info["current_piece"],
-                        episode_info["next_piece"],
-                    )
-                observation, _, terminated, truncated, episode_info = environment.step(action)
-                target_was_reached = (
-                    not play_forever and episode_info["cleared_lines"] >= target_lines
-                )
-                if target_was_reached or terminated or truncated:
-                    break
-            completed_episode_count += 1
-            if not play_forever:
-                break
-    finally:
-        environment.close()
-
-    target_was_reached = episode_info["cleared_lines"] >= target_lines
-    print(
-        f"Heuristic policy: target_reached={target_was_reached}, "
-        f"pieces={episode_info['episode_steps']}, score={episode_info['score']}, "
-        f"lines={episode_info['cleared_lines']}, holes={episode_info['holes']}, "
-        f"holds={hold_action_count}"
-    )
-
-
-def _run_bootstrap(output_directory: Path) -> None:
-    from gb_tetris_rl.homebrew import download_pandoras_blocks
-
-    homebrew_files = download_pandoras_blocks(output_directory)
-    print(f"ROM: {homebrew_files.rom_path}")
-    print(f"Symbols: {homebrew_files.symbols_path}")
-
-
-def _run_playback(arguments: argparse.Namespace) -> None:
-    from gb_tetris_rl.playback import watch_trained_agent
-
-    episode_summaries = watch_trained_agent(
-        arguments.rom,
-        arguments.model,
-        episode_count=arguments.episodes,
-        show_window=arguments.window,
-        recording_path=arguments.record,
-        capture_every_n_steps=arguments.record_every,
-        seed=arguments.seed,
-        control_mode=arguments.controls,
-        use_expert_safety=arguments.expert_safety,
-        target_lines=arguments.target_lines,
-        play_forever=arguments.forever,
-    )
-    for episode_number, episode_info in enumerate(episode_summaries, start=1):
-        print(
-            f"Episode {episode_number}: score={episode_info['score']}, "
-            f"lines={episode_info['cleared_lines']}, steps={episode_info['episode_steps']}, "
-            f"holds={episode_info['hold_actions']}, "
-            f"safety_interventions={episode_info['safety_interventions']}"
-        )
-    if arguments.record is not None:
-        print(f"Saved recording: {arguments.record.expanduser().resolve()}")
 
 
 if __name__ == "__main__":

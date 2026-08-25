@@ -1,3 +1,3 @@
-"""Reinforcement-learning tools for Game Boy Tetris."""
+"""Hold-aware reinforcement learning for Pandora's Blocks."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

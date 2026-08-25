@@ -1,156 +1,185 @@
 # Game Boy Tetris RL
 
-A deliberately small reinforcement-learning project that trains a CUDA-backed
-DQN agent to play a real Game Boy falling-block game through
+A small reinforcement-learning project that trains one hold-aware DQN policy
+to play [Pandora's Blocks](https://github.com/Villadelfia/dmgtris), an
+open-source Game Boy falling-block game, through
 [PyBoy](https://github.com/Baekalfen/PyBoy).
 
-The agent sees the settled 18 by 10 board instead of scraping pixels. Pandora's
-Blocks supports both frame-level buttons and a faster placement action: choose
-one of four rotations and one of ten columns, then hard-drop. Rewards prioritize
-actual cleared lines and score, with smaller signals for holes, height, and
-bumpiness.
+![Hold-aware agent playing Pandora's Blocks through PyBoy](docs/demo.gif)
 
-## Legal boundary
+This preview is a real 10-line PyBoy run of the learned policy with planner
+safety: 27 pieces, 10 hold actions, and 12 reported planner interventions.
 
-The zero-friction path uses
-[Pandora's Blocks](https://github.com/Villadelfia/dmgtris), an original Game Boy
-homebrew released under GPL-3.0. Its author distributes the ROM and matching
-debug symbols, so `bootstrap` can legally download a checksum-pinned build.
+The policy does not scrape pixels. It receives a 202-value observation:
 
-Nintendo's Tetris is also supported when you supply a ROM dumped from a
-cartridge you own. This repository never downloads or redistributes that ROM.
-All ROMs and emulator save files remain ignored by Git.
+- 180 settled board cells
+- 7 values for the current piece
+- 7 values for the next piece
+- 8 values for the hold slot, including empty
 
-No screen scraping is required. The Pandora's Blocks adapter reads the named
-playfield, score, line-clear, level, and game-state locations published by its
-assembly source and `.sym` file.
+It chooses one of 80 actions: four rotations by ten columns, either directly or
+after using hold.
 
-## Setup
+## Run the demo
 
-The project is tested with Python 3.14 and PyTorch's CUDA 13 runtime. Install
-[`uv`](https://docs.astral.sh/uv/getting-started/installation/), then create the
-locked project environment:
+Install the locked environment and fetch the checksum-pinned GPL ROM:
 
 ```sh
-uv sync
-```
-
-Fetch the open-source homebrew and verify the complete setup:
-
-```sh
+uv sync --locked
 uv run gb-tetris-rl bootstrap
-uv run gb-tetris-rl doctor --rom roms/PandorasBlocks.gbc
+uv run gb-tetris-rl doctor
 ```
 
-## Try the environment
-
-Run a short random-policy episode first. This verifies input, observations,
-rewards, and resets without beginning a long training run.
+Then run the canonical local checkpoint:
 
 ```sh
-uv run gb-tetris-rl random --rom roms/PandorasBlocks.gbc --steps 2000
+uv run gb-tetris-rl demo
 ```
 
-Add `--window` to watch the emulator at normal speed.
+The demo opens PyBoy, aims for 40 lines, and uses the learned policy with a
+deterministic planner as a safety layer. It prints the intervention count so a
+stable hybrid run cannot be mistaken for pure neural performance.
+
+To see what the neural policy can do by itself:
+
+```sh
+uv run gb-tetris-rl demo --neural-only
+```
+
+`models/demo-agent.zip` is a generated local artifact and is intentionally not
+committed. Train a replacement if it is missing.
+
+## Where the agent learns
+
+There is one neural architecture and two consecutive training stages:
+
+```text
+deterministic planner
+        |
+        | labels simulated board states
+        v
+imitation pretraining                 src/gb_tetris_rl/agent/imitation.py
+        |
+        | initializes the DQN policy
+        v
+PyBoy environment -> rewards -> DQN   src/gb_tetris_rl/agent/training.py
+                              |
+                              v
+                         model artifacts
+```
+
+1. `generate_planner_demonstrations` simulates legal placements and records the
+   planner's chosen action for each board.
+2. `pretrain_policy_from_demonstrations` updates the policy network with
+   cross-entropy loss so it learns to copy those choices.
+3. `train_agent` calls `dqn_agent.learn(...)`. This is the reinforcement-learning
+   stage: Stable-Baselines3 collects transitions from real PyBoy workers and
+   optimizes the policy from the shaped reward in `game/rewards.py`.
+
+The planner in `agent/planner.py` never learns. It is a deterministic baseline,
+a source of imitation labels, and an optional demo safety layer.
 
 ## Train
 
 ```sh
 uv run gb-tetris-rl train \
-  --rom roms/PandorasBlocks.gbc \
-  --controls placements \
-  --expert-samples 50000 \
-  --expert-epochs 80 \
+  --run-dir models/runs/hold-aware-v1 \
+  --demonstrations 50000 \
+  --imitation-epochs 80 \
   --timesteps 50000 \
-  --output models/tetris-dqn \
   --device cuda \
   --envs 8
 ```
 
-Training first distills good placements from a deterministic board planner into
-the CUDA network, then fine-tunes with Stable-Baselines3 DQN. The pre-RL model is
-saved as `models/tetris-dqn-expert.zip`; this matters because RL is only an
-improvement if real-ROM evaluation beats that checkpoint. PyBoy runs headlessly
-and without a frame limit by default. `--envs 8` feeds the shared CUDA policy
-from eight emulator processes. Add `--window --speed 0` to display the first
-worker at unlimited speed, or `--speed 1` for human-speed rendering.
+Every run has an explicit artifact layout:
 
-The first useful milestone is not "perfect Tetris." It is beating the random
-policy on mean lines cleared over the same deterministic episode seeds.
-
-## Watch or record the agent
-
-```sh
-uv run gb-tetris-rl watch \
-  --rom roms/PandorasBlocks.gbc \
-  --model models/tetris-dqn-expert.zip \
-  --controls placements \
-  --expert-safety \
-  --target-lines 100 \
-  --episodes 1 \
-  --window
+```text
+models/runs/hold-aware-v1/
+  imitation.zip       policy after planner imitation
+  dqn-final.zip       policy after emulator reinforcement learning
+  dqn-checkpoints/    intermediate recovery checkpoints
 ```
 
-`--expert-safety` keeps the network's placement when it agrees with the
-two-piece afterstate planner and corrects it otherwise. Omit the flag to measure
-the neural policy alone. This separation prevents a visually impressive hybrid
-run from being reported as pure-network performance. Use `--record` to write a
-GIF instead of opening an SDL window.
+These are checkpoints of the same policy architecture, not different model
+implementations. The project root keeps only `models/demo-agent.zip` as the
+canonical demo checkpoint. Historical local experiments live in
+`models/archive/` and are not part of the runtime path.
 
-Hold-aware placement uses a separate observation/action contract so older
-models remain loadable: 202 inputs include the held-piece one-hot state, and 80
-actions represent 40 direct placements plus 40 hold-then-place decisions.
+Evaluate checkpoints on fixed seeds before promoting one to the demo:
 
 ```sh
-uv run gb-tetris-rl heuristic \
-  --rom roms/PandorasBlocks.gbc \
-  --hold \
-  --forever \
-  --window \
-  --speed 1
+# Honest neural-only result
+uv run gb-tetris-rl evaluate \
+  --model models/runs/hold-aware-v1/dqn-final.zip \
+  --episodes 5
+
+# Hybrid result, reported separately
+uv run gb-tetris-rl evaluate \
+  --model models/runs/hold-aware-v1/dqn-final.zip \
+  --episodes 5 \
+  --planner-safety \
+  --target-lines 40
 ```
 
-`--forever` resets to another deterministic seed after a top-out or the 20,000
-piece safety limit. It intentionally has no line target. `--speed 1` preserves
-the Game Boy clock, so the ROM's level-dependent gravity acceleration remains
-visible; use `--speed 0` for unlimited emulation speed.
+Line counts on deterministic, unseen seeds are the acceptance metric. Training
+reward alone is not enough evidence that the policy learned useful play.
 
-To validate the emulator controls and counters without any neural model:
-
-```sh
-uv run gb-tetris-rl heuristic \
-  --rom roms/PandorasBlocks.gbc \
-  --target-lines 40 \
-  --seed 0
-```
-
-## Project structure
+## Project map
 
 ```text
 src/gb_tetris_rl/
-  environment.py   Gymnasium/PyBoy boundary
-  game_adapters.py source-backed state readers for both supported games
-  homebrew.py      pinned GPL ROM and symbol downloader
-  heuristic.py     fast afterstate simulation and two-piece planner
-  expert_training.py CUDA policy distillation dataset and optimizer
-  rewards.py       Pure board measurements and reward shaping
-  roms.py          ROM header validation
-  training.py      DQN configuration and checkpoints
-  playback.py      Evaluation and GIF recording
-  cli.py           doctor, random, heuristic, train, and watch commands
-tests/
-  test_expert_training.py
-  test_environment.py
-  test_game_adapters.py
-  test_heuristic.py
-  test_playback.py
-  test_rewards.py
-  test_roms.py
-  test_training.py
+  agent/
+    planner.py       pure board simulator and deterministic action planner
+    imitation.py     demonstration generation and imitation optimization
+    training.py      DQN construction, PyBoy workers, learning, checkpoints
+    evaluation.py    neural-only and planner-guarded evaluation, GIF output
+  game/
+    contracts.py     the single 202-input/80-action agent contract
+    environment.py   Gymnasium environment and reward transitions
+    pandoras_blocks.py  source-backed memory reader and emulator controls
+    rewards.py       pure board measurements and reward shaping
+    rom.py           cartridge title and checksum validation
+  commands.py        command workflows
+  cli.py             argument parsing only
+  homebrew.py        pinned ROM and symbol download
+tests/                mirrors the modules above
+models/               generated artifacts, documented separately
 ```
 
-## Why Tetris
+The runtime loop is deliberately short:
 
-Falling-block games have short repeatable episodes, a discrete action space,
-measurable progress, and a compact observation. It is a much more manageable
-first emulator RL target than a long exploration game with sparse rewards.
+```text
+Pandora's Blocks ROM
+        v
+PandorasBlocksAdapter -> TetrisEnvironment -> 202-value observation
+        ^                                         |
+        |                                         v
+        +---------- one of 80 actions <- DQN policy
+```
+
+## Other useful commands
+
+Run the deterministic planner without loading a neural model:
+
+```sh
+uv run gb-tetris-rl planner --target-lines 40 --window
+```
+
+Record an evaluated policy as a GIF:
+
+```sh
+uv run gb-tetris-rl evaluate \
+  --model models/demo-agent.zip \
+  --episodes 1 \
+  --record recordings/demo.gif
+```
+
+## Legal boundary
+
+`bootstrap` downloads a source-matched Pandora's Blocks ROM and symbol file from
+the upstream GPL-3.0 project and verifies both checksums. ROMs, symbols, emulator
+state, recordings, and model weights stay ignored by Git.
+
+This project no longer carries a second Nintendo Tetris integration. Keeping one
+legally reproducible game and one agent contract makes the training and demo path
+easy to audit.

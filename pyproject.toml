@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gb-tetris-rl"
-version = "0.1.0"
-description = "CUDA DQN training for open-source Game Boy falling-block games through PyBoy"
+version = "0.2.0"
+description = "Hold-aware DQN training for Pandora's Blocks through PyBoy"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

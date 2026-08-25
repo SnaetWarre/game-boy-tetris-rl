@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
 
-Board = NDArray[np.uint8]
+from gb_tetris_rl.game.contracts import Board
 
 
 @dataclass(frozen=True)

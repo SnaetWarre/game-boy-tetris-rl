@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from gb_tetris_rl.rewards import (
+from gb_tetris_rl.game.rewards import (
     TetrisSnapshot,
     calculate_transition_reward,
     create_snapshot,

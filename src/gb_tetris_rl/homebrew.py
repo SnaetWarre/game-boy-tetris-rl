@@ -3,16 +3,13 @@ from hashlib import sha256
 from pathlib import Path
 from urllib.request import urlopen
 
-from gb_tetris_rl.roms import PANDORAS_BLOCKS_SHA256
+from gb_tetris_rl.game.rom import PANDORAS_BLOCKS_SHA256
 
 PANDORAS_BLOCKS_COMMIT = "84b61665339ca25fc1db92107d87df4c702fcb5c"
 PANDORAS_BLOCKS_BASE_URL = (
-    "https://raw.githubusercontent.com/Villadelfia/dmgtris/"
-    f"{PANDORAS_BLOCKS_COMMIT}/bin"
+    f"https://raw.githubusercontent.com/Villadelfia/dmgtris/{PANDORAS_BLOCKS_COMMIT}/bin"
 )
-PANDORAS_BLOCKS_SYMBOLS_SHA256 = (
-    "ce075b93c92f52606e8c81d6add5f665cc9d68e2b736e9c4b328dfaf76b15770"
-)
+PANDORAS_BLOCKS_SYMBOLS_SHA256 = "ce075b93c92f52606e8c81d6add5f665cc9d68e2b736e9c4b328dfaf76b15770"
 
 
 @dataclass(frozen=True)

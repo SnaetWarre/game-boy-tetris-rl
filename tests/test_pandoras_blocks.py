@@ -2,7 +2,8 @@ import unittest
 
 import numpy as np
 
-from gb_tetris_rl.game_adapters import TETRIS_BOARD_SHAPE, PandorasBlocksAdapter
+from gb_tetris_rl.game.contracts import BOARD_SHAPE
+from gb_tetris_rl.game.pandoras_blocks import PandorasBlocksAdapter
 
 
 class FakeMemoryPyBoy:
@@ -23,7 +24,7 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
     def test_converts_source_field_tiles_to_binary_board(self) -> None:
         adapter, fake_pyboy = create_adapter_for_memory_tests()
         shadow_start = adapter._SHADOW_FIELD_ADDRESS
-        shadow_size = 24 * adapter._SHADOW_FIELD_ROW_STRIDE
+        shadow_size = adapter._SHADOW_FIELD_ROWS * adapter._SHADOW_FIELD_ROW_STRIDE
         fake_pyboy.memory[shadow_start : shadow_start + shadow_size] = bytes(
             [adapter._EMPTY_TILE] * shadow_size
         )
@@ -37,7 +38,7 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
 
         board = adapter.read_board()
 
-        self.assertEqual(board.shape, TETRIS_BOARD_SHAPE)
+        self.assertEqual(board.shape, BOARD_SHAPE)
         self.assertEqual(board.dtype, np.uint8)
         self.assertEqual(board[0, 0], 1)
         self.assertEqual(board[0, 1], 0)

@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from gb_tetris_rl.playback import _write_gif
+from gb_tetris_rl.agent.evaluation import _write_gif
 
 
 class GifRecordingTests(unittest.TestCase):

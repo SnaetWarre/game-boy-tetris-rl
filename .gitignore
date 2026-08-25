@@ -16,6 +16,9 @@ __pycache__/
 *.state
 roms/
 
-models/
+# Model weights are generated artifacts. Keep the directory documentation.
+models/*.zip
+models/runs/
+models/archive/
 recordings/
 runs/

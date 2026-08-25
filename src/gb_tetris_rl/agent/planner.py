@@ -1,18 +1,21 @@
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
 
-from gb_tetris_rl.environment import PLACEMENT_ACTION_COUNT, PLACEMENT_COLUMN_COUNT
-from gb_tetris_rl.rewards import measure_board
+from gb_tetris_rl.game.contracts import (
+    BOARD_COLUMNS,
+    DIRECT_PLACEMENT_ACTION_COUNT,
+    EMPTY_HOLD_SLOT,
+    Board,
+)
+from gb_tetris_rl.game.rewards import measure_board
 
-Board = NDArray[np.uint8]
 PieceShape = tuple[tuple[int, int], ...]
 
 
 @dataclass(frozen=True)
 class SimulatedPlacement:
-    action: int
+    placement_action: int
     board: Board
     cleared_line_count: int
     quality: float
@@ -116,7 +119,7 @@ def choose_placement_action(
     return action
 
 
-def choose_hold_placement_action(
+def choose_agent_action(
     board: Board,
     current_piece: int,
     next_piece: int,
@@ -125,7 +128,7 @@ def choose_hold_placement_action(
     use_lookahead: bool = True,
 ) -> int:
     comparable_normal_lookahead = (
-        next_piece if use_lookahead and held_piece != 7 else None
+        next_piece if use_lookahead and held_piece != EMPTY_HOLD_SLOT else None
     )
     normal_action, normal_quality = _choose_action_with_quality(
         board,
@@ -133,17 +136,15 @@ def choose_hold_placement_action(
         comparable_normal_lookahead,
     )
 
-    piece_after_hold = next_piece if held_piece == 7 else held_piece
-    hold_lookahead_piece = (
-        next_piece if use_lookahead and held_piece != 7 else None
-    )
+    piece_after_hold = next_piece if held_piece == EMPTY_HOLD_SLOT else held_piece
+    hold_lookahead_piece = next_piece if use_lookahead and held_piece != EMPTY_HOLD_SLOT else None
     hold_action, hold_quality = _choose_action_with_quality(
         board,
         piece_after_hold,
         hold_lookahead_piece,
     )
     if hold_quality > normal_quality:
-        return PLACEMENT_ACTION_COUNT + hold_action
+        return DIRECT_PLACEMENT_ACTION_COUNT + hold_action
     return normal_action
 
 
@@ -158,7 +159,7 @@ def _choose_action_with_quality(
     if not current_placements:
         return 0, float("-inf")
 
-    best_action = current_placements[0].action
+    best_action = current_placements[0].placement_action
     best_action_quality = float("-inf")
     for current_placement in current_placements:
         action_quality = current_placement.quality
@@ -169,7 +170,7 @@ def _choose_action_with_quality(
                     next_placement.quality for next_placement in next_placements
                 )
         if action_quality > best_action_quality:
-            best_action = current_placement.action
+            best_action = current_placement.placement_action
             best_action_quality = action_quality
     return best_action, best_action_quality
 
@@ -198,7 +199,7 @@ def enumerate_placements(board: Board, piece: int) -> list[SimulatedPlacement]:
             ) // board.shape[1]
             placements.append(
                 SimulatedPlacement(
-                    action=rotation * PLACEMENT_COLUMN_COUNT + left_column,
+                    placement_action=rotation * BOARD_COLUMNS + left_column,
                     board=board_after_drop,
                     cleared_line_count=cleared_line_count,
                     quality=_evaluate_board(board_after_drop, cleared_line_count),
