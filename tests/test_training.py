@@ -107,6 +107,12 @@ class TrainingSmokeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "at least one training stage"):
             train_agent("unused.gbc", "unused-run", invalid_config)
 
+    def test_rejects_zero_length_demonstration_episodes(self) -> None:
+        invalid_config = TrainingConfig(demonstration_episode_piece_limit=0)
+
+        with self.assertRaisesRegex(ValueError, "demonstration_episode_piece_limit"):
+            train_agent("unused.gbc", "unused-run", invalid_config)
+
 
 if __name__ == "__main__":
     unittest.main()

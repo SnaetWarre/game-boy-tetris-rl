@@ -6,6 +6,7 @@ from gb_tetris_rl.agent.evaluation import (
     evaluate_agent,
     write_evaluation_report,
 )
+from gb_tetris_rl.agent.experiment import NeuralExperimentConfig, run_neural_experiment
 from gb_tetris_rl.agent.planner import choose_agent_action
 from gb_tetris_rl.agent.training import TrainingConfig, train_agent
 from gb_tetris_rl.game.contracts import DIRECT_PLACEMENT_ACTION_COUNT, board_from_observation
@@ -107,6 +108,8 @@ def run_train_command(command_arguments: argparse.Namespace) -> None:
         emulation_speed=command_arguments.speed,
         demonstration_count=command_arguments.demonstrations,
         imitation_epoch_count=command_arguments.imitation_epochs,
+        demonstration_episode_piece_limit=command_arguments.demonstration_episode_pieces,
+        planner_lookahead=command_arguments.planner_lookahead,
     )
     training_artifacts = train_agent(
         command_arguments.rom,
@@ -117,6 +120,55 @@ def run_train_command(command_arguments: argparse.Namespace) -> None:
         print(f"Imitation model: {training_artifacts.imitation_model_path}")
     if training_artifacts.dqn_model_path is not None:
         print(f"DQN model: {training_artifacts.dqn_model_path}")
+
+
+def run_next_phase_command(command_arguments: argparse.Namespace) -> None:
+    training_config = TrainingConfig(
+        total_timesteps=command_arguments.timesteps,
+        seed=command_arguments.seed,
+        device=command_arguments.device,
+        environment_count=command_arguments.envs,
+        demonstration_count=command_arguments.demonstrations,
+        imitation_epoch_count=command_arguments.imitation_epochs,
+        demonstration_episode_piece_limit=command_arguments.demonstration_episode_pieces,
+        planner_lookahead=True,
+    )
+    experiment_config = NeuralExperimentConfig(
+        training=training_config,
+        incumbent_model_path=command_arguments.incumbent_model,
+        evaluation_episode_count=command_arguments.evaluation_episodes,
+        evaluation_seed=command_arguments.evaluation_seed,
+        promote_qualifying_candidate=command_arguments.promote,
+    )
+    experiment_artifacts = run_neural_experiment(
+        command_arguments.rom,
+        command_arguments.run_dir,
+        experiment_config,
+    )
+    promotion_decision = experiment_artifacts.promotion_decision
+    incumbent_metrics = promotion_decision.incumbent_metrics
+    candidate_metrics = promotion_decision.candidate_metrics
+    print(
+        "Incumbent neural result: "
+        f"mean={incumbent_metrics.mean_cleared_lines:.2f}, "
+        f"median={incumbent_metrics.median_cleared_lines:.2f}, "
+        f"range={incumbent_metrics.minimum_cleared_lines}-"
+        f"{incumbent_metrics.maximum_cleared_lines}"
+    )
+    print(
+        "Candidate neural result: "
+        f"mean={candidate_metrics.mean_cleared_lines:.2f}, "
+        f"median={candidate_metrics.median_cleared_lines:.2f}, "
+        f"range={candidate_metrics.minimum_cleared_lines}-"
+        f"{candidate_metrics.maximum_cleared_lines}"
+    )
+    print(f"Promotion gate: {promotion_decision.reason}")
+    print(f"Candidate model: {experiment_artifacts.candidate_model_path}")
+    print(f"Comparison report: {experiment_artifacts.comparison_path}")
+    if experiment_artifacts.candidate_was_promoted:
+        print(f"Promoted candidate to: {command_arguments.incumbent_model.expanduser().resolve()}")
+    elif command_arguments.promote:
+        print("Incumbent unchanged because the candidate did not pass the promotion gate.")
 
 
 def run_evaluate_command(command_arguments: argparse.Namespace) -> None:

@@ -8,6 +8,7 @@ from gb_tetris_rl.commands import (
     run_demo_command,
     run_doctor_command,
     run_evaluate_command,
+    run_next_phase_command,
     run_planner_command,
     run_train_command,
 )
@@ -32,6 +33,7 @@ def build_argument_parser() -> argparse.ArgumentParser:
     _add_demo_command(command_parsers)
     _add_planner_command(command_parsers)
     _add_train_command(command_parsers)
+    _add_next_phase_command(command_parsers)
     _add_evaluate_command(command_parsers)
     return parser
 
@@ -143,6 +145,17 @@ def _add_train_command(command_parsers) -> None:
     )
     train_parser.add_argument("--demonstrations", type=_nonnegative_integer, default=50_000)
     train_parser.add_argument("--imitation-epochs", type=_nonnegative_integer, default=80)
+    train_parser.add_argument(
+        "--demonstration-episode-pieces",
+        type=_positive_integer,
+        default=200,
+        help="maximum simulated planner trajectory length (default: 200)",
+    )
+    train_parser.add_argument(
+        "--planner-lookahead",
+        action="store_true",
+        help="label demonstrations with the planner's next-piece lookahead",
+    )
     train_parser.add_argument("--seed", type=int, default=0)
     train_parser.add_argument("--device", default="auto")
     train_parser.add_argument(
@@ -159,6 +172,68 @@ def _add_train_command(command_parsers) -> None:
         help="visible worker speed; 0 removes the frame limiter",
     )
     train_parser.set_defaults(command_runner=run_train_command)
+
+
+def _add_next_phase_command(command_parsers) -> None:
+    experiment_parser = command_parsers.add_parser(
+        "next-phase",
+        help="train and gate a long-horizon neural candidate against the incumbent",
+    )
+    _add_rom_argument(experiment_parser)
+    experiment_parser.add_argument(
+        "--run-dir",
+        type=Path,
+        default=Path("models/runs/neural-next-phase"),
+        help="candidate models and comparison reports",
+    )
+    experiment_parser.add_argument(
+        "--incumbent-model",
+        type=Path,
+        default=DEFAULT_DEMO_MODEL_PATH,
+        help=f"current model to beat (default: {DEFAULT_DEMO_MODEL_PATH})",
+    )
+    experiment_parser.add_argument(
+        "--demonstrations",
+        type=_positive_integer,
+        default=100_000,
+    )
+    experiment_parser.add_argument(
+        "--imitation-epochs",
+        type=_positive_integer,
+        default=120,
+    )
+    experiment_parser.add_argument(
+        "--demonstration-episode-pieces",
+        type=_positive_integer,
+        default=4_000,
+        help="maximum pieces per long-horizon planner trajectory (default: 4000)",
+    )
+    experiment_parser.add_argument(
+        "--timesteps",
+        type=_nonnegative_integer,
+        default=0,
+        help="optional DQN fine-tuning after imitation; disabled by default",
+    )
+    experiment_parser.add_argument("--seed", type=int, default=0)
+    experiment_parser.add_argument("--evaluation-seed", type=int, default=10_000)
+    experiment_parser.add_argument(
+        "--evaluation-episodes",
+        type=_positive_integer,
+        default=50,
+    )
+    experiment_parser.add_argument("--device", default="auto")
+    experiment_parser.add_argument(
+        "--envs",
+        type=_positive_integer,
+        default=4,
+        help="parallel PyBoy workers used if DQN fine-tuning is enabled",
+    )
+    experiment_parser.add_argument(
+        "--promote",
+        action="store_true",
+        help="replace the incumbent only if candidate mean improves and median does not regress",
+    )
+    experiment_parser.set_defaults(command_runner=run_next_phase_command)
 
 
 def _add_evaluate_command(command_parsers) -> None:

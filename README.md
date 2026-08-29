@@ -128,6 +128,34 @@ The project root keeps only `models/demo-agent.zip` as the canonical local demo
 checkpoint. Historical local experiments live in `models/archive/` and are not
 part of the runtime path.
 
+### Next neural phase
+
+The dedicated experiment command trains a long-horizon candidate from planner
+demonstrations with next-piece lookahead, then evaluates it and the current
+neural checkpoint on the same 50 seeds:
+
+```sh
+uv run gb-tetris-rl next-phase --device cuda
+```
+
+Its default run uses 100,000 demonstrations, trajectories of up to 4,000
+pieces, 120 imitation epochs, and no DQN fine-tuning. The run directory contains
+the candidate model, separate incumbent and candidate evaluation reports, and
+`comparison.json` with model checksums and the promotion decision.
+
+The command never changes `models/demo-agent.zip` by default. Add `--promote`
+when you want it to replace the incumbent, and it will still do so only when the
+candidate has a higher mean without a lower median on the fixed-seed neural-only
+evaluation:
+
+```sh
+uv run gb-tetris-rl next-phase --device cuda --promote
+```
+
+This is an experiment gate, not a guarantee that a larger imitation run will
+beat the current policy. DQN remains opt-in with `--timesteps` because the last
+validated fine-tuning run regressed.
+
 ## Verified result
 
 ### Long-running placement control

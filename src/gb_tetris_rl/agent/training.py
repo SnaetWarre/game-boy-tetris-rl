@@ -15,6 +15,8 @@ class TrainingConfig:
     emulation_speed: int = 0
     demonstration_count: int = 50_000
     imitation_epoch_count: int = 80
+    demonstration_episode_piece_limit: int = 200
+    planner_lookahead: bool = False
 
 
 @dataclass(frozen=True)
@@ -167,6 +169,8 @@ def _run_imitation_stage(
     demonstration_dataset = generate_planner_demonstrations(
         config.demonstration_count,
         seed=config.seed,
+        maximum_episode_pieces=config.demonstration_episode_piece_limit,
+        use_lookahead=config.planner_lookahead,
     )
     imitation_metrics = pretrain_policy_from_demonstrations(
         dqn_agent,
@@ -195,6 +199,8 @@ def _validate_training_config(config: TrainingConfig) -> None:
         raise ValueError("demonstration_count cannot be negative")
     if config.imitation_epoch_count < 0:
         raise ValueError("imitation_epoch_count cannot be negative")
+    if config.demonstration_episode_piece_limit < 1:
+        raise ValueError("demonstration_episode_piece_limit must be at least 1")
     if (config.demonstration_count == 0) != (config.imitation_epoch_count == 0):
         raise ValueError(
             "demonstration_count and imitation_epoch_count must both be zero or positive"
