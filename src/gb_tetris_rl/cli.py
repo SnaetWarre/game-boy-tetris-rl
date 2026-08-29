@@ -100,6 +100,11 @@ def _add_demo_command(command_parsers) -> None:
         action="store_true",
         help="start a new seeded game after every top-out until interrupted",
     )
+    demo_parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="remove the emulator frame limiter while keeping the window visible",
+    )
     demo_parser.set_defaults(command_runner=run_demo_command)
 
 

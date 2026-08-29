@@ -164,12 +164,15 @@ def run_demo_command(command_arguments: argparse.Namespace) -> None:
     )
     print(f"Demo mode: {demo_mode}")
     print("Every planner disagreement is reported; override mode follows the planner.")
+    if command_arguments.fast:
+        print("Emulator speed: uncapped")
     episode_summaries = evaluate_agent(
         command_arguments.rom,
         command_arguments.model,
         episode_count=1,
         show_window=not command_arguments.headless,
         seed=command_arguments.seed,
+        emulation_speed=0 if command_arguments.fast else None,
         use_planner_override=uses_planner_override,
         target_lines=None if command_arguments.forever else command_arguments.target_lines,
         play_forever=command_arguments.forever,

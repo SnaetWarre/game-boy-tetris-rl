@@ -66,6 +66,7 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
         self._should_render_frames = display_emulator_window or render_mode == "rgb_array"
         self._maximum_episode_steps = maximum_episode_steps
         self._episode_step_count = 0
+        self._emulator_is_running = True
         self._previous_snapshot = self._capture_snapshot()
         self._is_closed = False
 
@@ -99,7 +100,7 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
             raise ValueError(f"invalid Tetris action: {action!r}")
 
         placement = decode_agent_action(action)
-        emulator_is_running = self._game.place_piece(
+        self._emulator_is_running = self._game.place_piece(
             placement.rotation,
             placement.column_from_left_wall,
             use_hold=placement.uses_hold,
@@ -107,7 +108,7 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
         )
         self._episode_step_count += 1
 
-        game_is_over = self._game.game_is_over or not emulator_is_running
+        game_is_over = self._game.game_is_over or not self._emulator_is_running
         current_snapshot = self._capture_snapshot()
         reward = calculate_transition_reward(
             self._previous_snapshot,
@@ -130,6 +131,10 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
             return None
         screen_rgba = np.asarray(self._pyboy.screen.ndarray)
         return np.array(screen_rgba[:, :, :3], dtype=np.uint8, copy=True)
+
+    @property
+    def emulator_is_running(self) -> bool:
+        return self._emulator_is_running
 
     def close(self) -> None:
         if not self._is_closed:

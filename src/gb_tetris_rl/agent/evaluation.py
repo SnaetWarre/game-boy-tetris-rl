@@ -36,6 +36,7 @@ def evaluate_agent(
     episode_count: int,
     show_window: bool,
     seed: int,
+    emulation_speed: int | None = None,
     use_planner_safety: bool = False,
     use_planner_override: bool = False,
     target_lines: int | None = None,
@@ -55,7 +56,11 @@ def evaluate_agent(
 
     dqn_agent = _load_compatible_agent(model_path)
     render_mode = "human" if show_window else "rgb_array" if recording_path else None
-    environment = TetrisEnvironment(rom_path, render_mode=render_mode)
+    environment = TetrisEnvironment(
+        rom_path,
+        render_mode=render_mode,
+        emulation_speed=emulation_speed,
+    )
     recorded_frames: list[NDArray[np.uint8]] = []
     episode_summaries: list[EpisodeSummary] = []
     maximum_recorded_frames = 3_000
@@ -119,6 +124,8 @@ def evaluate_agent(
                 episode_summaries[:] = [episode_summary]
             else:
                 episode_summaries.append(episode_summary)
+            if not environment.emulator_is_running:
+                break
     finally:
         environment.close()
 

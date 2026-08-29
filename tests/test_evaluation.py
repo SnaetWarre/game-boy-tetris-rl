@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 import numpy as np
 from PIL import Image
@@ -10,6 +11,7 @@ from gb_tetris_rl.agent.evaluation import (
     EpisodeSummary,
     _action_requires_planner_rescue,
     _write_gif,
+    evaluate_agent,
     write_evaluation_report,
 )
 from gb_tetris_rl.game.contracts import BOARD_SHAPE, EMPTY_HOLD_SLOT, encode_agent_observation
@@ -99,6 +101,120 @@ class PlannerSafetyTests(unittest.TestCase):
                 self.episode_info,
                 proposed_action=0,
             )
+        )
+
+
+class StoppedEmulatorTests(unittest.TestCase):
+    def test_forever_mode_stops_after_the_emulator_stops(self) -> None:
+        observation = encode_agent_observation(
+            np.zeros(BOARD_SHAPE, dtype=np.uint8),
+            current_piece=0,
+            next_piece=1,
+            held_piece=EMPTY_HOLD_SLOT,
+        )
+        episode_info = {
+            "score": 0,
+            "cleared_lines": 0,
+            "level": 0,
+            "aggregate_height": 0,
+            "holes": 0,
+            "bumpiness": 0,
+            "episode_steps": 1,
+            "current_piece": 0,
+            "next_piece": 1,
+            "held_piece": EMPTY_HOLD_SLOT,
+        }
+        stopped_environment = Mock()
+        stopped_environment.reset.return_value = (observation, episode_info)
+        stopped_environment.step.return_value = (
+            observation,
+            0.0,
+            True,
+            False,
+            episode_info,
+        )
+        stopped_environment.emulator_is_running = False
+        agent = Mock()
+        agent.predict.return_value = (np.asarray(0), None)
+
+        with (
+            patch(
+                "gb_tetris_rl.agent.evaluation.TetrisEnvironment",
+                return_value=stopped_environment,
+            ),
+            patch(
+                "gb_tetris_rl.agent.evaluation._load_compatible_agent",
+                return_value=agent,
+            ),
+        ):
+            episode_summaries = evaluate_agent(
+                "unused.gbc",
+                "unused.zip",
+                episode_count=1,
+                show_window=True,
+                seed=10_000,
+                play_forever=True,
+            )
+
+        self.assertEqual(len(episode_summaries), 1)
+        stopped_environment.reset.assert_called_once_with(seed=10_000)
+        stopped_environment.close.assert_called_once_with()
+
+    def test_passes_the_requested_emulation_speed_to_the_environment(self) -> None:
+        observation = encode_agent_observation(
+            np.zeros(BOARD_SHAPE, dtype=np.uint8),
+            current_piece=0,
+            next_piece=1,
+            held_piece=EMPTY_HOLD_SLOT,
+        )
+        episode_info = {
+            "score": 0,
+            "cleared_lines": 0,
+            "level": 0,
+            "aggregate_height": 0,
+            "holes": 0,
+            "bumpiness": 0,
+            "episode_steps": 1,
+            "current_piece": 0,
+            "next_piece": 1,
+            "held_piece": EMPTY_HOLD_SLOT,
+        }
+        environment = Mock()
+        environment.reset.return_value = (observation, episode_info)
+        environment.step.return_value = (
+            observation,
+            0.0,
+            True,
+            False,
+            episode_info,
+        )
+        environment.emulator_is_running = True
+        agent = Mock()
+        agent.predict.return_value = (np.asarray(0), None)
+
+        with (
+            patch(
+                "gb_tetris_rl.agent.evaluation.TetrisEnvironment",
+                return_value=environment,
+            ) as environment_constructor,
+            patch(
+                "gb_tetris_rl.agent.evaluation._load_compatible_agent",
+                return_value=agent,
+            ),
+        ):
+            evaluate_agent(
+                "unused.gbc",
+                "unused.zip",
+                episode_count=1,
+                show_window=True,
+                seed=10_000,
+                emulation_speed=0,
+            )
+
+        environment_constructor.assert_called_once_with(
+            "unused.gbc",
+            render_mode="human",
+            emulation_speed=0,
         )
 
 

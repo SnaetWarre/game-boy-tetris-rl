@@ -52,6 +52,7 @@ class FakePandorasBlocksAdapter:
         self.next_piece = 1
         self.held_piece = EMPTY_HOLD_SLOT
         self.game_is_over = False
+        self.emulator_is_running = True
         self.last_placement: tuple[int, int, bool, bool] | None = None
         FakePandorasBlocksAdapter.latest_instance = self
 
@@ -75,7 +76,7 @@ class FakePandorasBlocksAdapter:
             use_hold,
             render_frames,
         )
-        return True
+        return self.emulator_is_running
 
 
 def create_environment(**environment_options) -> TetrisEnvironment:
@@ -152,6 +153,20 @@ class EnvironmentContractTests(unittest.TestCase):
 
         self.assertTrue(terminated)
         self.assertLess(reward, -4.9)
+
+    def test_reports_when_the_emulator_has_stopped(self) -> None:
+        environment = create_environment()
+        try:
+            adapter = FakePandorasBlocksAdapter.latest_instance
+            assert adapter is not None
+            adapter.emulator_is_running = False
+
+            _, _, terminated, _, _ = environment.step(0)
+        finally:
+            environment.close()
+
+        self.assertTrue(terminated)
+        self.assertFalse(environment.emulator_is_running)
 
 
 if __name__ == "__main__":

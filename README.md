@@ -43,6 +43,12 @@ action that differs from the deterministic planner. It prints disagreement and
 rescue counts so a stable hybrid run cannot be mistaken for pure neural
 performance.
 
+Add `--fast` to keep the emulator window visible but remove its frame limiter:
+
+```sh
+uv run gb-tetris-rl demo --fast
+```
+
 To see what the neural policy can do by itself:
 
 ```sh
