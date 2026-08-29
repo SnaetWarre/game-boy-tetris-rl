@@ -65,14 +65,14 @@ class FakePandorasBlocksAdapter:
     def place_piece(
         self,
         target_rotation: int,
-        right_moves_from_left_wall: int,
+        target_left_column: int,
         *,
         use_hold: bool,
         render_frames: bool,
     ) -> bool:
         self.last_placement = (
             target_rotation,
-            right_moves_from_left_wall,
+            target_left_column,
             use_hold,
             render_frames,
         )

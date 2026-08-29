@@ -29,6 +29,8 @@ class PandorasBlocksAdapter:
     _GAMEPLAY_STATE = 3
     _MODE_ADDRESS = 0xFFE5
     _CURRENT_PIECE_ADDRESS = 0xFFDF
+    _CURRENT_PIECE_X_ADDRESS = 0xFFE0
+    _CURRENT_PIECE_Y_ADDRESS = 0xFFE1
     _NEXT_PIECE_ADDRESS = 0xFFD2
     _HELD_PIECE_ADDRESS = 0xFFE3
     _HOLD_SPENT_ADDRESS = 0xFFE4
@@ -40,8 +42,21 @@ class PandorasBlocksAdapter:
     _HARD_DROP_MODE = 2
     _SPEED_CURVE_ADDRESS = 0xCF3B
     _CHILL_SPEED_CURVE = 5
+    _PIECE_SPAWN_Y = 3
+    _INTEGER_GRAVITY_ADDRESS = 0xFF85
+    _FRACTIONAL_GRAVITY_ADDRESS = 0xFF86
 
-    _LEFT_WALL_MOVE_COUNT = 10
+    # The ROM stores each rotation in a 4x4 box. These are the empty columns
+    # before the leftmost occupied cell in the source-matched rotation table.
+    _ROTATION_LEFT_PADDING = (
+        (0, 2, 0, 2),  # I
+        (0, 1, 0, 1),  # Z
+        (0, 0, 0, 0),  # S
+        (0, 1, 0, 0),  # J
+        (0, 1, 0, 0),  # L
+        (1, 1, 1, 1),  # O
+        (0, 1, 0, 0),  # T
+    )
     _MAXIMUM_STARTUP_FRAMES = 600
     _MAXIMUM_SPAWN_WAIT_FRAMES = 240
     _MAXIMUM_HOLD_WAIT_FRAMES = 120
@@ -101,7 +116,7 @@ class PandorasBlocksAdapter:
     def place_piece(
         self,
         target_rotation: int,
-        right_moves_from_left_wall: int,
+        target_left_column: int,
         *,
         use_hold: bool,
         render_frames: bool,
@@ -118,20 +133,28 @@ class PandorasBlocksAdapter:
         if int(self._pyboy.memory[self._STALE_PIECE_ADDRESS]) == 0:
             emulator_is_running = self._tick_frame(render_frames)
 
-        for _ in range(target_rotation):
-            emulator_is_running = self._press_button("b", render_frames) and emulator_is_running
+        if self._piece_is_in_motion:
+            self._pyboy.memory[self._CURRENT_PIECE_Y_ADDRESS] = self._PIECE_SPAWN_Y
+            original_integer_gravity = int(self._pyboy.memory[self._INTEGER_GRAVITY_ADDRESS])
+            original_fractional_gravity = int(self._pyboy.memory[self._FRACTIONAL_GRAVITY_ADDRESS])
+            self._pyboy.memory[self._INTEGER_GRAVITY_ADDRESS] = 0
+            self._pyboy.memory[self._FRACTIONAL_GRAVITY_ADDRESS] = 0
+            try:
+                emulator_is_running = (
+                    self._position_piece(target_rotation, target_left_column, render_frames)
+                    and emulator_is_running
+                )
+            finally:
+                self._pyboy.memory[self._INTEGER_GRAVITY_ADDRESS] = original_integer_gravity
+                self._pyboy.memory[self._FRACTIONAL_GRAVITY_ADDRESS] = original_fractional_gravity
 
-        for _ in range(self._LEFT_WALL_MOVE_COUNT):
-            emulator_is_running = self._press_button("left", render_frames) and emulator_is_running
-
-        for _ in range(right_moves_from_left_wall):
-            emulator_is_running = self._press_button("right", render_frames) and emulator_is_running
-
-        self._pyboy.button_press("up")
-        emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
         piece_has_locked = not self._piece_is_in_motion
-        self._pyboy.button_release("up")
-        emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
+        if not piece_has_locked:
+            self._pyboy.button_press("up")
+            emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
+            piece_has_locked = not self._piece_is_in_motion
+            self._pyboy.button_release("up")
+            emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
 
         if piece_has_locked and self._piece_is_in_motion:
             return emulator_is_running
@@ -146,6 +169,47 @@ class PandorasBlocksAdapter:
             piece_has_locked = piece_has_locked or not self._piece_is_in_motion
 
         raise RuntimeError("Pandora's Blocks did not spawn the next piece after a hard drop")
+
+    def _position_piece(
+        self,
+        target_rotation: int,
+        target_left_column: int,
+        render_frames: bool,
+    ) -> bool:
+        piece_type = self.current_piece
+        rotation_left_padding = self._ROTATION_LEFT_PADDING[piece_type][target_rotation]
+        piece_origin_column = int(self._pyboy.memory[self._CURRENT_PIECE_X_ADDRESS])
+        target_origin_column = (
+            target_left_column + self._SHADOW_FIELD_LEFT_BORDER_WIDTH - rotation_left_padding
+        )
+        horizontal_distance = target_origin_column - piece_origin_column
+        movement_button = "right" if horizontal_distance > 0 else "left"
+        rotation_buttons = ["a"] if target_rotation == 3 else ["b"] * target_rotation
+
+        emulator_is_running = True
+        combined_input_count = max(len(rotation_buttons), abs(horizontal_distance))
+        for input_index in range(combined_input_count):
+            pressed_buttons: list[str] = []
+            if input_index < len(rotation_buttons):
+                pressed_buttons.append(rotation_buttons[input_index])
+            if input_index < abs(horizontal_distance):
+                pressed_buttons.append(movement_button)
+            emulator_is_running = (
+                self._press_buttons(pressed_buttons, render_frames) and emulator_is_running
+            )
+            if not self._piece_is_in_motion or not emulator_is_running:
+                return emulator_is_running
+
+        actual_origin_column = int(self._pyboy.memory[self._CURRENT_PIECE_X_ADDRESS])
+        remaining_horizontal_distance = target_origin_column - actual_origin_column
+        correction_button = "right" if remaining_horizontal_distance > 0 else "left"
+        for _ in range(abs(remaining_horizontal_distance)):
+            emulator_is_running = (
+                self._press_button(correction_button, render_frames) and emulator_is_running
+            )
+            if not self._piece_is_in_motion or not emulator_is_running:
+                break
+        return emulator_is_running
 
     @property
     def score(self) -> int:
@@ -226,8 +290,13 @@ class PandorasBlocksAdapter:
         return emulator_is_running
 
     def _press_button(self, button_name: str, render_frames: bool) -> bool:
-        self._pyboy.button_press(button_name)
+        return self._press_buttons([button_name], render_frames)
+
+    def _press_buttons(self, button_names: list[str], render_frames: bool) -> bool:
+        for button_name in button_names:
+            self._pyboy.button_press(button_name)
         press_frame_is_running = self._tick_frame(render_frames)
-        self._pyboy.button_release(button_name)
+        for button_name in button_names:
+            self._pyboy.button_release(button_name)
         release_frame_is_running = self._tick_frame(render_frames)
         return press_frame_is_running and release_frame_is_running

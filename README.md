@@ -22,6 +22,13 @@ The policy does not scrape pixels. It receives a 202-value observation:
 It chooses one of 80 actions: four rotations by ten columns, either directly or
 after using hold.
 
+These are atomic placement-control actions, not human-speed button sequences.
+The adapter returns the active piece to its legal spawn row and pauses gravity
+only while applying the requested rotation and horizontal movement. It restores
+the ROM's current gravity before the hard drop. This keeps the Gymnasium action
+contract exact as Pandora's Blocks accelerates, but placement-control results
+are not human-equivalent records.
+
 ## Run the demo
 
 Install the locked environment and fetch the checksum-pinned GPL ROM:
@@ -122,6 +129,28 @@ checkpoint. Historical local experiments live in `models/archive/` and are not
 part of the runtime path.
 
 ## Verified result
+
+### Long-running placement control
+
+The former controller started missing requested columns as gravity increased.
+On seeds 10000 through 10004 it topped out at 239, 253, 255, 257, and 240
+cleared lines. After making placement actions atomic, all five seeds reached the
+500-line evaluation cap with zero final holes. Seed 10000 also reached 1,000
+lines with zero holes in 3,014 pieces.
+
+```sh
+uv run gb-tetris-rl planner \
+  --target-lines 1000 \
+  --maximum-pieces 10000 \
+  --seed 10000
+```
+
+Those are deterministic planner results used to validate the emulator action
+contract. They are a stronger source of imitation labels, not neural-only
+performance. The raw comparison is committed in
+`docs/benchmarks/placement-control-v0.4.0.json`.
+
+### Neural-only policy
 
 Neural-only evaluation on the same 50 deterministic seeds, 10000 through 10049:
 

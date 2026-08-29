@@ -16,6 +16,7 @@ class TopOutPyBoy(FakeMemoryPyBoy):
         super().__init__()
         self.pressed_buttons: set[str] = set()
         self.button_events: list[tuple[str, str]] = []
+        self.tick_gravity_values: list[int] = []
 
     def button_press(self, button_name: str) -> None:
         self.pressed_buttons.add(button_name)
@@ -27,8 +28,34 @@ class TopOutPyBoy(FakeMemoryPyBoy):
 
     def tick(self, frame_count: int, *, render: bool, sound: bool) -> bool:
         del frame_count, render, sound
+        self.tick_gravity_values.append(
+            int(self.memory[PandorasBlocksAdapter._INTEGER_GRAVITY_ADDRESS])
+        )
         if "up" in self.pressed_buttons:
             self.memory[PandorasBlocksAdapter._MODE_ADDRESS] = 24
+        return True
+
+
+class MovingPiecePyBoy(FakeMemoryPyBoy):
+    def __init__(self) -> None:
+        super().__init__()
+        self.pressed_buttons: set[str] = set()
+        self.button_events: list[tuple[str, str]] = []
+
+    def button_press(self, button_name: str) -> None:
+        self.pressed_buttons.add(button_name)
+        self.button_events.append(("press", button_name))
+
+    def button_release(self, button_name: str) -> None:
+        self.pressed_buttons.discard(button_name)
+        self.button_events.append(("release", button_name))
+
+    def tick(self, frame_count: int, *, render: bool, sound: bool) -> bool:
+        del frame_count, render, sound
+        if "left" in self.pressed_buttons:
+            self.memory[PandorasBlocksAdapter._CURRENT_PIECE_X_ADDRESS] -= 1
+        if "right" in self.pressed_buttons:
+            self.memory[PandorasBlocksAdapter._CURRENT_PIECE_X_ADDRESS] += 1
         return True
 
 
@@ -100,7 +127,7 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
 
         emulator_is_running = adapter.place_piece(
             target_rotation=0,
-            right_moves_from_left_wall=0,
+            target_left_column=0,
             use_hold=False,
             render_frames=False,
         )
@@ -108,6 +135,60 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
         self.assertTrue(emulator_is_running)
         self.assertNotIn("up", fake_pyboy.pressed_buttons)
         self.assertIn(("release", "up"), fake_pyboy.button_events)
+
+    def test_moves_directly_from_the_spawn_column_to_the_target(self) -> None:
+        fake_pyboy = MovingPiecePyBoy()
+        adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
+        adapter._pyboy = fake_pyboy
+        adapter._cleared_line_total = 0
+        adapter._current_clear_was_counted = False
+        fake_pyboy.memory[adapter._MODE_ADDRESS] = adapter._PIECE_IN_MOTION_MODE
+        fake_pyboy.memory[adapter._CURRENT_PIECE_ADDRESS] = 0
+        fake_pyboy.memory[adapter._CURRENT_PIECE_X_ADDRESS] = 5
+
+        emulator_is_running = adapter._position_piece(
+            target_rotation=1,
+            target_left_column=9,
+            render_frames=False,
+        )
+
+        self.assertTrue(emulator_is_running)
+        self.assertEqual(fake_pyboy.memory[adapter._CURRENT_PIECE_X_ADDRESS], 9)
+        self.assertEqual(fake_pyboy.button_events.count(("press", "b")), 1)
+        self.assertEqual(fake_pyboy.button_events.count(("press", "right")), 4)
+        self.assertLess(
+            fake_pyboy.button_events.index(("press", "b")),
+            fake_pyboy.button_events.index(("release", "right")),
+        )
+
+    def test_restores_gravity_after_placement_input(self) -> None:
+        fake_pyboy = TopOutPyBoy()
+        adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
+        adapter._pyboy = fake_pyboy
+        adapter._cleared_line_total = 0
+        adapter._current_clear_was_counted = False
+        fake_pyboy.memory[adapter._MODE_ADDRESS] = adapter._PIECE_IN_MOTION_MODE
+        fake_pyboy.memory[adapter._STALE_PIECE_ADDRESS] = 1
+        fake_pyboy.memory[adapter._CURRENT_PIECE_X_ADDRESS] = 5
+        fake_pyboy.memory[adapter._CURRENT_PIECE_Y_ADDRESS] = 12
+        fake_pyboy.memory[adapter._INTEGER_GRAVITY_ADDRESS] = 3
+        fake_pyboy.memory[adapter._FRACTIONAL_GRAVITY_ADDRESS] = 17
+
+        adapter.place_piece(
+            target_rotation=1,
+            target_left_column=9,
+            use_hold=False,
+            render_frames=False,
+        )
+
+        self.assertEqual(fake_pyboy.memory[adapter._INTEGER_GRAVITY_ADDRESS], 3)
+        self.assertEqual(fake_pyboy.memory[adapter._FRACTIONAL_GRAVITY_ADDRESS], 17)
+        self.assertIn(0, fake_pyboy.tick_gravity_values)
+        self.assertEqual(fake_pyboy.tick_gravity_values[-1], 3)
+        self.assertEqual(
+            fake_pyboy.memory[adapter._CURRENT_PIECE_Y_ADDRESS],
+            adapter._PIECE_SPAWN_Y,
+        )
 
 
 if __name__ == "__main__":

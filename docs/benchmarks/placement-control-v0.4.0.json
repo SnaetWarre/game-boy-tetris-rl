@@ -1,0 +1,33 @@
+{
+  "version": "0.4.0",
+  "evaluated_on": "2026-08-29",
+  "mode": "deterministic planner with atomic placement control",
+  "starting_seed": 10000,
+  "acceptance_metric": "cleared_lines",
+  "baseline": {
+    "target_lines": 500,
+    "maximum_pieces": 10000,
+    "seeds": [10000, 10001, 10002, 10003, 10004],
+    "cleared_lines": [239, 253, 255, 257, 240],
+    "target_reached_count": 0
+  },
+  "atomic_placement_control": {
+    "target_lines": 500,
+    "maximum_pieces": 10000,
+    "seeds": [10000, 10001, 10002, 10003, 10004],
+    "cleared_lines": [500, 500, 500, 500, 500],
+    "final_holes": [0, 0, 0, 0, 0],
+    "placed_pieces": [1524, 1459, 1481, 1473, 1505],
+    "target_reached_count": 5
+  },
+  "stress_test": {
+    "seed": 10000,
+    "target_lines": 1000,
+    "maximum_pieces": 10000,
+    "target_reached": true,
+    "cleared_lines": 1000,
+    "final_holes": 0,
+    "placed_pieces": 3014
+  },
+  "claim_boundary": "Planner and placement-control benchmark only; not neural-only or human-equivalent performance."
+}
