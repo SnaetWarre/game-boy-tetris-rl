@@ -9,7 +9,13 @@ import numpy as np
 from gymnasium import spaces
 
 from gb_tetris_rl.agent.training import TrainingConfig, train_agent
-from gb_tetris_rl.game.contracts import AGENT_ACTION_COUNT, AGENT_OBSERVATION_SHAPE
+from gb_tetris_rl.game.contracts import (
+    AGENT_ACTION_COUNT,
+    AGENT_OBSERVATION_SHAPE,
+    BOARD_SHAPE,
+    EMPTY_HOLD_SLOT,
+    encode_agent_observation,
+)
 
 
 class TinyTrainingEnvironment(gym.Env):
@@ -30,19 +36,24 @@ class TinyTrainingEnvironment(gym.Env):
             dtype=np.uint8,
         )
         self._step_count = 0
+        self._observation = encode_agent_observation(
+            np.zeros(BOARD_SHAPE, dtype=np.uint8),
+            current_piece=0,
+            next_piece=1,
+            held_piece=EMPTY_HOLD_SLOT,
+        )
 
     def reset(self, *, seed=None, options=None):
         del options
         super().reset(seed=seed)
         self._step_count = 0
-        return np.zeros(AGENT_OBSERVATION_SHAPE, dtype=np.uint8), {}
+        return self._observation.copy(), {}
 
     def step(self, action):
         del action
         self._step_count += 1
-        observation = np.zeros(AGENT_OBSERVATION_SHAPE, dtype=np.uint8)
         terminated = self._step_count >= 3
-        return observation, 0.0, terminated, False, {}
+        return self._observation.copy(), 0.0, terminated, False, {}
 
 
 @unittest.skipUnless(find_spec("stable_baselines3"), "training dependencies are not installed")

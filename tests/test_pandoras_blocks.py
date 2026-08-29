@@ -11,6 +11,27 @@ class FakeMemoryPyBoy:
         self.memory = bytearray(0x10000)
 
 
+class TopOutPyBoy(FakeMemoryPyBoy):
+    def __init__(self) -> None:
+        super().__init__()
+        self.pressed_buttons: set[str] = set()
+        self.button_events: list[tuple[str, str]] = []
+
+    def button_press(self, button_name: str) -> None:
+        self.pressed_buttons.add(button_name)
+        self.button_events.append(("press", button_name))
+
+    def button_release(self, button_name: str) -> None:
+        self.pressed_buttons.discard(button_name)
+        self.button_events.append(("release", button_name))
+
+    def tick(self, frame_count: int, *, render: bool, sound: bool) -> bool:
+        del frame_count, render, sound
+        if "up" in self.pressed_buttons:
+            self.memory[PandorasBlocksAdapter._MODE_ADDRESS] = 24
+        return True
+
+
 def create_adapter_for_memory_tests() -> tuple[PandorasBlocksAdapter, FakeMemoryPyBoy]:
     fake_pyboy = FakeMemoryPyBoy()
     adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
@@ -67,6 +88,26 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
 
         self.assertEqual(adapter.score, 12_345)
         self.assertTrue(adapter.game_is_over)
+
+    def test_releases_hard_drop_button_when_the_piece_tops_out(self) -> None:
+        fake_pyboy = TopOutPyBoy()
+        adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
+        adapter._pyboy = fake_pyboy
+        adapter._cleared_line_total = 0
+        adapter._current_clear_was_counted = False
+        fake_pyboy.memory[adapter._MODE_ADDRESS] = adapter._PIECE_IN_MOTION_MODE
+        fake_pyboy.memory[adapter._STALE_PIECE_ADDRESS] = 1
+
+        emulator_is_running = adapter.place_piece(
+            target_rotation=0,
+            right_moves_from_left_wall=0,
+            use_hold=False,
+            render_frames=False,
+        )
+
+        self.assertTrue(emulator_is_running)
+        self.assertNotIn("up", fake_pyboy.pressed_buttons)
+        self.assertIn(("release", "up"), fake_pyboy.button_events)
 
 
 if __name__ == "__main__":

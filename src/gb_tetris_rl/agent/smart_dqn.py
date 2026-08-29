@@ -1,5 +1,7 @@
+import numpy as np
 import torch
 from gymnasium import spaces
+from stable_baselines3 import DQN
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor, create_mlp
 from stable_baselines3.dqn.policies import DQNPolicy, QNetwork
 from torch import nn
@@ -72,7 +74,12 @@ class DuelingQNetwork(QNetwork):
         extracted_features = self.extract_features(observations, self.features_extractor)
         state_values = self.state_value_network(extracted_features)
         action_advantages = self.action_advantage_network(extracted_features)
-        return state_values + action_advantages - action_advantages.mean(dim=1, keepdim=True)
+        action_values = (
+            state_values + action_advantages - action_advantages.mean(dim=1, keepdim=True)
+        )
+        action_masks = canonical_agent_action_masks(observations.detach().cpu().numpy())
+        action_mask_tensor = torch.as_tensor(action_masks, device=action_values.device)
+        return action_values.masked_fill(~action_mask_tensor, -torch.inf)
 
 
 class TetrisDuelingPolicy(DQNPolicy):
@@ -84,7 +91,46 @@ class TetrisDuelingPolicy(DQNPolicy):
 
     def _predict(self, observations, deterministic: bool = True) -> torch.Tensor:
         del deterministic
-        action_values = self.q_net(observations)
-        action_masks = canonical_agent_action_masks(observations.detach().cpu().numpy())
-        action_mask_tensor = torch.as_tensor(action_masks, device=self.device)
-        return action_values.masked_fill(~action_mask_tensor, -torch.inf).argmax(dim=1)
+        return self.q_net(observations).argmax(dim=1)
+
+
+class TetrisDQN(DQN):
+    """Keep every DQN action path inside the canonical placement contract."""
+
+    def predict(
+        self,
+        observation,
+        state=None,
+        episode_start=None,
+        deterministic: bool = False,
+    ):
+        should_explore = not deterministic and np.random.random() < self.exploration_rate
+        if should_explore:
+            return self._sample_canonical_actions(observation), state
+        return self.policy.predict(
+            observation,
+            state,
+            episode_start,
+            deterministic,
+        )
+
+    def _sample_action(self, learning_starts, action_noise=None, n_envs: int = 1):
+        if self.num_timesteps < learning_starts:
+            if self._last_obs is None:
+                raise RuntimeError("cannot sample a warm-up action without an observation")
+            canonical_actions = self._sample_canonical_actions(self._last_obs)
+            canonical_actions = np.asarray(canonical_actions).reshape(n_envs)
+            return canonical_actions, canonical_actions
+        return super()._sample_action(learning_starts, action_noise, n_envs)
+
+    def _sample_canonical_actions(self, observation) -> np.ndarray:
+        action_masks = canonical_agent_action_masks(np.asarray(observation))
+        if action_masks.ndim == 1:
+            valid_actions = np.flatnonzero(action_masks)
+            return np.asarray(self.action_space.np_random.choice(valid_actions))
+        return np.asarray(
+            [
+                self.action_space.np_random.choice(np.flatnonzero(action_mask))
+                for action_mask in action_masks
+            ]
+        )

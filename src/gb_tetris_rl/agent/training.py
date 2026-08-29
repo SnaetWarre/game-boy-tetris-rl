@@ -51,7 +51,6 @@ def train_agent(
     _validate_training_config(config)
 
     try:
-        from stable_baselines3 import DQN
         from stable_baselines3.common.callbacks import CheckpointCallback
         from stable_baselines3.common.env_checker import check_env
         from stable_baselines3.common.vec_env import SubprocVecEnv
@@ -68,9 +67,13 @@ def train_agent(
         contract_check_environment.close()
 
     training_environment = _create_training_environment(rom_path, config, SubprocVecEnv)
-    from gb_tetris_rl.agent.smart_dqn import TetrisDuelingPolicy, TetrisFeatureExtractor
+    from gb_tetris_rl.agent.smart_dqn import (
+        TetrisDQN,
+        TetrisDuelingPolicy,
+        TetrisFeatureExtractor,
+    )
 
-    dqn_agent = DQN(
+    dqn_agent = TetrisDQN(
         TetrisDuelingPolicy,
         training_environment,
         learning_rate=1e-4,

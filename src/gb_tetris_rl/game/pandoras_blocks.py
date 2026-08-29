@@ -127,9 +127,14 @@ class PandorasBlocksAdapter:
         for _ in range(right_moves_from_left_wall):
             emulator_is_running = self._press_button("right", render_frames) and emulator_is_running
 
-        self._pyboy.button("up")
+        self._pyboy.button_press("up")
         emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
         piece_has_locked = not self._piece_is_in_motion
+        self._pyboy.button_release("up")
+        emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
+
+        if piece_has_locked and self._piece_is_in_motion:
+            return emulator_is_running
 
         for _ in range(self._MAXIMUM_SPAWN_WAIT_FRAMES):
             if self.game_is_over or not emulator_is_running:
@@ -221,7 +226,8 @@ class PandorasBlocksAdapter:
         return emulator_is_running
 
     def _press_button(self, button_name: str, render_frames: bool) -> bool:
-        self._pyboy.button(button_name)
+        self._pyboy.button_press(button_name)
         press_frame_is_running = self._tick_frame(render_frames)
+        self._pyboy.button_release(button_name)
         release_frame_is_running = self._tick_frame(render_frames)
         return press_frame_is_running and release_frame_is_running
