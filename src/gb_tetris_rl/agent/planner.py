@@ -202,7 +202,7 @@ def drop_pieces(
 
     Pieces fall from above the visible field, so a placement is valid only when
     it is canonical and every column it touches has room above the stack.
-    Input boards must be settled, without full rows, as every game board is.
+    Full rows already on the input board are cleared and counted too.
     Returns boards after line clears [N, 40, columns], cleared line counts
     [N, 40], and validity [N, 40].
     """
@@ -345,8 +345,12 @@ def _clear_full_rows(
         return columns, cleared_lines
 
     # Remove the topmost full row each pass: rows above it fall by one and
-    # rows below it, including any other full rows, keep their index.
-    for _ in range(_MAXIMUM_CLEARED_LINES):
+    # rows below it, including any other full rows, keep their index. A drop
+    # completes at most four rows; extra passes only run when the input board
+    # already had full rows, as at the level-9999 kill screen.
+    pass_count = 0
+    while pass_count < _MAXIMUM_CLEARED_LINES or bool(full_rows.any()):
+        pass_count += 1
         topmost_full_row = full_rows & -full_rows
         rows_above = torch.where(topmost_full_row != 0, topmost_full_row - 1, 0).unsqueeze(-1)
         rows_below = ~(rows_above | topmost_full_row.unsqueeze(-1))

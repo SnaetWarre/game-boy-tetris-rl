@@ -161,7 +161,7 @@ uv run gb-tetris-rl next-phase --device cuda
 ```
 
 Evaluation episodes stop at 500 lines (`--evaluation-target-lines`), because a
-strong policy would otherwise play until the 20,000-piece episode limit. The
+strong policy would otherwise play a full game of about 25,000 pieces. The
 run directory contains the candidate model, separate incumbent and candidate
 evaluation reports, and `comparison.json` with model checksums and the
 promotion decision.
@@ -195,11 +195,14 @@ uv run gb-tetris-rl planner \
   --seed 10000
 ```
 
-Both the planner and the v0.4 neural policy currently stop near level 3000
-(about 7,500 pieces and 2,400 to 2,540 lines on seeds 10000 through 10002). On
-seed 10001 the planner's board is clean at level 3001 and tops out within ten
-pieces, so the ROM changes something there that the placement adapter does not
-handle yet. Treat roughly 2,400 lines as the current ceiling for any agent.
+Games used to end near level 3000 (about 7,500 pieces) for every agent. Once
+ARE drops to a single frame, a piece can lock and the next one spawn between two
+observed frames; the adapter missed that lock and let the next piece fall and
+lock at its spawn column with no input. The adapter now recognizes a fresh
+piece by the ROM's stale-piece flag and pauses gravity from the hold through
+positioning. A full planner game on seed 10001 now matches the simulator on
+every placement up to level 9999, the speed curve's kill screen, where the ROM
+stops clearing lines and ends the game after 25,042 pieces and 8,435 lines.
 
 Those are deterministic planner results used to validate the emulator action
 contract. They are a stronger source of imitation labels, not neural-only
@@ -217,7 +220,10 @@ Neural-only evaluation on the same 50 deterministic seeds, 10000 through 10049:
 | v0.4 afterstate imitation + DAgger | 500.06 | 500 | 500 | 501 |
 
 The v0.4 run stopped every episode at a 500-line cap, so 500 is a floor, not
-the policy's limit: all 50 seeds reached it without planner help. The v0.3
+the policy's limit: all 50 seeds reached it without planner help. Uncapped, the
+same checkpoint plays every complete game on seeds 10000 through 10004 to the
+level-9999 kill screen: 25,040 pieces and 7,989 to 8,092 lines (mean 8,037.2),
+with no planner involvement. The v0.3
 checkpoint scored 6.62 in the same run, because evaluation now loads models on
 the CPU and a few near-tied action values resolve differently than on CUDA.
 Raw per-episode counts and model checksums are committed in

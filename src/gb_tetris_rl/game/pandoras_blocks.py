@@ -123,49 +123,69 @@ class PandorasBlocksAdapter:
         if not self._piece_is_in_motion:
             raise RuntimeError("cannot place a piece outside piece-in-motion mode")
 
-        emulator_is_running = True
-        if use_hold:
-            emulator_is_running = self._apply_hold(render_frames)
-            if self.game_is_over or not emulator_is_running:
-                return emulator_is_running
+        # Gravity is paused from the hold through positioning, so neither 20G
+        # nor the lock delay can act on a piece before it reaches its target.
+        memory = self._pyboy.memory
+        original_gravity = (
+            int(memory[self._INTEGER_GRAVITY_ADDRESS]),
+            int(memory[self._FRACTIONAL_GRAVITY_ADDRESS]),
+        )
+        memory[self._INTEGER_GRAVITY_ADDRESS] = 0
+        memory[self._FRACTIONAL_GRAVITY_ADDRESS] = 0
+        try:
+            emulator_is_running = True
+            if use_hold:
+                emulator_is_running = self._apply_hold(render_frames)
+                if self.game_is_over or not emulator_is_running:
+                    return emulator_is_running
 
-        if int(self._pyboy.memory[self._STALE_PIECE_ADDRESS]) == 0:
-            emulator_is_running = self._tick_frame(render_frames)
+            if self._piece_is_fresh:
+                emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
 
-        if self._piece_is_in_motion:
-            self._pyboy.memory[self._CURRENT_PIECE_Y_ADDRESS] = self._PIECE_SPAWN_Y
-            original_integer_gravity = int(self._pyboy.memory[self._INTEGER_GRAVITY_ADDRESS])
-            original_fractional_gravity = int(self._pyboy.memory[self._FRACTIONAL_GRAVITY_ADDRESS])
-            self._pyboy.memory[self._INTEGER_GRAVITY_ADDRESS] = 0
-            self._pyboy.memory[self._FRACTIONAL_GRAVITY_ADDRESS] = 0
-            try:
+            if self._piece_is_in_motion:
+                memory[self._CURRENT_PIECE_Y_ADDRESS] = self._PIECE_SPAWN_Y
                 emulator_is_running = (
                     self._position_piece(target_rotation, target_left_column, render_frames)
                     and emulator_is_running
                 )
-            finally:
-                self._pyboy.memory[self._INTEGER_GRAVITY_ADDRESS] = original_integer_gravity
-                self._pyboy.memory[self._FRACTIONAL_GRAVITY_ADDRESS] = original_fractional_gravity
+        finally:
+            # A level-up while gravity was paused writes new gravity; keep it.
+            paused_gravity = (
+                int(memory[self._INTEGER_GRAVITY_ADDRESS]),
+                int(memory[self._FRACTIONAL_GRAVITY_ADDRESS]),
+            )
+            if paused_gravity == (0, 0):
+                memory[self._INTEGER_GRAVITY_ADDRESS] = original_gravity[0]
+                memory[self._FRACTIONAL_GRAVITY_ADDRESS] = original_gravity[1]
 
+        return self._hard_drop_and_wait_for_next_piece(render_frames) and emulator_is_running
+
+    def _hard_drop_and_wait_for_next_piece(self, render_frames: bool) -> bool:
+        """Lock the active piece and stop on the first frame of the next one.
+
+        With a one-frame ARE the piece can lock and the next one spawn between
+        two observed frames, so a fresh piece is also recognized by its stale
+        flag. Waiting for a visible non-motion frame instead let the next piece
+        fall and lock at its spawn column without any input.
+        """
+        emulator_is_running = True
         piece_has_locked = not self._piece_is_in_motion
         if not piece_has_locked:
             self._pyboy.button_press("up")
-            emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
-            piece_has_locked = not self._piece_is_in_motion
+            emulator_is_running = self._tick_frame(render_frames)
+            piece_has_locked = self._piece_has_left_motion_or_respawned
             self._pyboy.button_release("up")
             emulator_is_running = self._tick_frame(render_frames) and emulator_is_running
-
-        if piece_has_locked and self._piece_is_in_motion:
-            return emulator_is_running
+            piece_has_locked = piece_has_locked or self._piece_has_left_motion_or_respawned
 
         for _ in range(self._MAXIMUM_SPAWN_WAIT_FRAMES):
             if self.game_is_over or not emulator_is_running:
                 return emulator_is_running
-            if piece_has_locked and self._piece_is_in_motion:
+            if self._piece_is_in_motion and piece_has_locked:
                 return emulator_is_running
 
             emulator_is_running = self._tick_frame(render_frames)
-            piece_has_locked = piece_has_locked or not self._piece_is_in_motion
+            piece_has_locked = piece_has_locked or self._piece_has_left_motion_or_respawned
 
         raise RuntimeError("Pandora's Blocks did not spawn the next piece after a hard drop")
 
@@ -237,6 +257,15 @@ class PandorasBlocksAdapter:
     @property
     def held_piece(self) -> int:
         return int(self._pyboy.memory[self._HELD_PIECE_ADDRESS])
+
+    @property
+    def _piece_is_fresh(self) -> bool:
+        """True until the ROM has processed a newly spawned piece's first frame."""
+        return int(self._pyboy.memory[self._STALE_PIECE_ADDRESS]) == 0
+
+    @property
+    def _piece_has_left_motion_or_respawned(self) -> bool:
+        return not self._piece_is_in_motion or self._piece_is_fresh
 
     @property
     def _piece_is_in_motion(self) -> bool:

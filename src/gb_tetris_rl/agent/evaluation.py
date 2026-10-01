@@ -48,8 +48,13 @@ def evaluate_agent(
     play_forever: bool = False,
     recording_path: str | Path | None = None,
     capture_every_n_steps: int = 2,
+    device: str = "cpu",
 ) -> list[EpisodeSummary]:
-    """Evaluate a learned policy, optionally guarded by the deterministic planner."""
+    """Evaluate a learned policy, optionally guarded by the deterministic planner.
+
+    Inference defaults to the CPU: with one observation per step it beats GPU
+    launch and copy overhead.
+    """
     if episode_count < 1:
         raise ValueError("episode_count must be at least 1")
     if capture_every_n_steps < 1:
@@ -59,7 +64,7 @@ def evaluate_agent(
     if use_planner_safety and use_planner_override:
         raise ValueError("planner safety and planner override are mutually exclusive")
 
-    dqn_agent = _load_compatible_agent(model_path)
+    dqn_agent = _load_compatible_agent(model_path, device)
     render_mode = "human" if show_window else "rgb_array" if recording_path else None
     environment = TetrisEnvironment(
         rom_path,
@@ -142,7 +147,7 @@ def evaluate_agent(
     return episode_summaries
 
 
-def _load_compatible_agent(model_path: str | Path):
+def _load_compatible_agent(model_path: str | Path, device: str):
     try:
         from stable_baselines3 import DQN
     except ImportError as import_error:
@@ -151,8 +156,7 @@ def _load_compatible_agent(model_path: str | Path):
     resolved_model_path = Path(model_path).expanduser().resolve()
     if not resolved_model_path.is_file():
         raise ValueError(f"model file does not exist: {resolved_model_path}")
-    # One observation per step: CPU inference beats GPU launch and copy overhead.
-    dqn_agent = DQN.load(str(resolved_model_path), device="cpu")
+    dqn_agent = DQN.load(str(resolved_model_path), device=device)
 
     observation_shape = dqn_agent.observation_space.shape
     action_count = getattr(dqn_agent.action_space, "n", None)

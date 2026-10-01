@@ -178,6 +178,7 @@ def run_evaluate_command(command_arguments: argparse.Namespace) -> None:
         target_lines=command_arguments.target_lines,
         recording_path=command_arguments.record,
         capture_every_n_steps=command_arguments.record_every,
+        device=command_arguments.device,
     )
     _print_episode_summaries(episode_summaries)
     if command_arguments.report is not None:
@@ -214,6 +215,7 @@ def run_demo_command(command_arguments: argparse.Namespace) -> None:
         use_planner_override=uses_planner_override,
         target_lines=None if command_arguments.forever else command_arguments.target_lines,
         play_forever=command_arguments.forever,
+        device=command_arguments.device,
     )
     _print_episode_summaries(episode_summaries)
 

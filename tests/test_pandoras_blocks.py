@@ -59,6 +59,57 @@ class MovingPiecePyBoy(FakeMemoryPyBoy):
         return True
 
 
+class OneFrameArePyBoy(FakeMemoryPyBoy):
+    """Replays the traced level-3000 timing with a one-frame ARE.
+
+    The hard drop locks on the button-release frame, the next piece spawns on
+    the following frame, and an untouched piece at 20G locks immediately.
+    """
+
+    def __init__(self, *, spawn_in_press_frame: bool = False) -> None:
+        super().__init__()
+        self.pressed_buttons: set[str] = set()
+        self.spawned_piece_count = 0
+        self._spawn_in_press_frame = spawn_in_press_frame
+        self._drop_was_pressed = False
+        self.memory[PandorasBlocksAdapter._MODE_ADDRESS] = (
+            PandorasBlocksAdapter._PIECE_IN_MOTION_MODE
+        )
+        self.memory[PandorasBlocksAdapter._STALE_PIECE_ADDRESS] = 0xFF
+        self.memory[PandorasBlocksAdapter._INTEGER_GRAVITY_ADDRESS] = 20
+
+    def button_press(self, button_name: str) -> None:
+        self.pressed_buttons.add(button_name)
+
+    def button_release(self, button_name: str) -> None:
+        self.pressed_buttons.discard(button_name)
+
+    def tick(self, frame_count: int, *, render: bool, sound: bool) -> bool:
+        del frame_count, render, sound
+        memory = self.memory
+        mode_address = PandorasBlocksAdapter._MODE_ADDRESS
+        if memory[PandorasBlocksAdapter._STALE_PIECE_ADDRESS] == 0:
+            memory[PandorasBlocksAdapter._STALE_PIECE_ADDRESS] = 0xFF
+        elif memory[mode_address] != PandorasBlocksAdapter._PIECE_IN_MOTION_MODE:
+            self._spawn_next_piece()
+        elif "up" in self.pressed_buttons:
+            if self._spawn_in_press_frame:
+                self._spawn_next_piece()
+            else:
+                self._drop_was_pressed = True
+        elif self._drop_was_pressed or memory[PandorasBlocksAdapter._INTEGER_GRAVITY_ADDRESS]:
+            self._drop_was_pressed = False
+            memory[mode_address] = 18
+        return True
+
+    def _spawn_next_piece(self) -> None:
+        self.memory[PandorasBlocksAdapter._MODE_ADDRESS] = (
+            PandorasBlocksAdapter._PIECE_IN_MOTION_MODE
+        )
+        self.memory[PandorasBlocksAdapter._STALE_PIECE_ADDRESS] = 0
+        self.spawned_piece_count += 1
+
+
 def create_adapter_for_memory_tests() -> tuple[PandorasBlocksAdapter, FakeMemoryPyBoy]:
     fake_pyboy = FakeMemoryPyBoy()
     adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
@@ -160,6 +211,20 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
             fake_pyboy.button_events.index(("press", "b")),
             fake_pyboy.button_events.index(("release", "right")),
         )
+
+    def test_stops_on_the_first_piece_spawned_after_the_hard_drop(self) -> None:
+        for spawn_in_press_frame in (False, True):
+            with self.subTest(spawn_in_press_frame=spawn_in_press_frame):
+                fake_pyboy = OneFrameArePyBoy(spawn_in_press_frame=spawn_in_press_frame)
+                adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
+                adapter._pyboy = fake_pyboy
+                adapter._cleared_line_total = 0
+                adapter._current_clear_was_counted = False
+
+                adapter.place_piece(0, 4, use_hold=False, render_frames=False)
+
+                self.assertEqual(fake_pyboy.spawned_piece_count, 1)
+                self.assertEqual(fake_pyboy.memory[adapter._INTEGER_GRAVITY_ADDRESS], 20)
 
     def test_restores_gravity_after_placement_input(self) -> None:
         fake_pyboy = TopOutPyBoy()

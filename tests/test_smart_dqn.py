@@ -174,6 +174,16 @@ class TetrisAfterstatePolicyTests(unittest.TestCase):
             canonical_agent_action_mask(observation),
         )
 
+    def test_scores_kill_screen_boards_with_uncleared_rows(self) -> None:
+        board = np.zeros(BOARD_SHAPE, dtype=np.uint8)
+        board[-6:] = 1
+        observation = encode_agent_observation(board, 0, 1, EMPTY_HOLD_SLOT)
+
+        with torch.no_grad():
+            action_values = self.agent.q_net(torch.as_tensor(observation)[None])
+
+        self.assertTrue(bool(torch.isfinite(action_values).any()))
+
     def test_saved_policy_reloads_with_identical_values(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             model_path = f"{temporary_directory}/afterstate.zip"

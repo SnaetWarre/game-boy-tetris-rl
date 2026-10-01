@@ -108,6 +108,7 @@ def _add_demo_command(command_parsers) -> None:
         action="store_true",
         help="remove the emulator frame limiter while keeping the window visible",
     )
+    _add_inference_device_argument(demo_parser)
     demo_parser.set_defaults(command_runner=run_demo_command)
 
 
@@ -265,7 +266,16 @@ def _add_evaluate_command(command_parsers) -> None:
         default=2,
         help="capture one GIF frame after this many placements",
     )
+    _add_inference_device_argument(evaluate_parser)
     evaluate_parser.set_defaults(command_runner=run_evaluate_command)
+
+
+def _add_inference_device_argument(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
+        "--device",
+        default="cpu",
+        help="policy inference device (default: cpu, fastest for one board per step)",
+    )
 
 
 def _add_rom_argument(command_parser: argparse.ArgumentParser) -> None:

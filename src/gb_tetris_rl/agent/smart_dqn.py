@@ -191,7 +191,11 @@ def _afterstate_context(observation_batch, cleared_lines: torch.Tensor) -> torch
     )
     return torch.cat(
         (
-            torch_functional.one_hot(cleared_lines.long(), _CLEARED_LINE_CLASS_COUNT),
+            torch_functional.one_hot(
+                # Only kill-screen boards with uncleared rows exceed four lines.
+                cleared_lines.long().clamp(max=_CLEARED_LINE_CLASS_COUNT - 1),
+                _CLEARED_LINE_CLASS_COUNT,
+            ),
             torch_functional.one_hot(upcoming_pieces, HELD_PIECE_TYPE_COUNT),
             torch_functional.one_hot(hold_slots, HELD_PIECE_TYPE_COUNT),
         ),

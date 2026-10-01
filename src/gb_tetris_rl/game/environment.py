@@ -40,7 +40,8 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
         render_mode: str | None = None,
         display_emulator_window: bool | None = None,
         emulation_speed: int | None = None,
-        maximum_episode_steps: int = 20_000,
+        # The ROM's level-9999 kill screen ends any game after about 25,000 pieces.
+        maximum_episode_steps: int = 30_000,
     ) -> None:
         super().__init__()
         if render_mode not in {None, "human", "rgb_array"}:

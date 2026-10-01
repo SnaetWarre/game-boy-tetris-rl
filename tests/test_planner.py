@@ -206,6 +206,17 @@ class PlacementHeuristicTests(unittest.TestCase):
         self.assertEqual(int(cleared_lines[0, 6]), 1)
         self.assertEqual(int(dropped_columns[0, 6].sum()), 0)
 
+    def test_clears_full_rows_already_on_the_board(self) -> None:
+        board = np.zeros((1, 18, 10), dtype=np.uint8)
+        board[0, -6:] = 1
+        board[0, -7, :6] = 1
+
+        dropped_columns, cleared_lines, valid = drop_pieces(pack(board), torch.tensor([0]))
+
+        self.assertTrue(valid[0, 6])
+        self.assertEqual(int(cleared_lines[0, 6]), 7)
+        self.assertEqual(int(columns_to_boards(dropped_columns[0, 6]).sum()), 0)
+
     def test_planner_takes_available_line_clear(self) -> None:
         board = np.zeros((18, 10), dtype=np.uint8)
         board[-1, :6] = 1
