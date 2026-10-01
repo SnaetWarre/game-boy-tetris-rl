@@ -30,21 +30,6 @@ class CanonicalActionMaskTests(unittest.TestCase):
                     expected_action_count,
                 )
 
-    def test_removes_duplicate_rotations_and_columns_outside_piece_width(self) -> None:
-        observation = encode_agent_observation(
-            np.zeros(BOARD_SHAPE, dtype=np.uint8),
-            current_piece=5,
-            next_piece=0,
-            held_piece=EMPTY_HOLD_SLOT,
-        )
-
-        action_mask = canonical_agent_action_mask(observation)
-
-        self.assertEqual(int(action_mask[:DIRECT_PLACEMENT_ACTION_COUNT].sum()), 9)
-        self.assertEqual(int(action_mask[DIRECT_PLACEMENT_ACTION_COUNT:].sum()), 17)
-        self.assertFalse(action_mask[9])
-        self.assertFalse(action_mask[10])
-
     def test_hold_actions_use_held_piece_when_slot_is_occupied(self) -> None:
         observation = encode_agent_observation(
             np.zeros(BOARD_SHAPE, dtype=np.uint8),

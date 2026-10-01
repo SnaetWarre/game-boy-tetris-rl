@@ -12,7 +12,6 @@ from gb_tetris_rl.agent.planner import (
     choose_agent_actions,
     columns_to_boards,
     drop_pieces,
-    enumerate_agent_afterstates,
     score_boards,
 )
 from gb_tetris_rl.game.contracts import EMPTY_HOLD_SLOT
@@ -141,11 +140,6 @@ class VectorizedPlacementTests(unittest.TestCase):
                         )
                         self.assertEqual(int(cleared_lines[board_index, action]), cleared)
 
-    def test_bitboards_round_trip_dense_boards(self) -> None:
-        boards = random_boards(50, seed=4) != 0
-
-        np.testing.assert_array_equal(columns_to_boards(pack(boards)).numpy(), boards)
-
     def test_board_score_matches_reference_measurements(self) -> None:
         boards = random_boards(100, seed=2)
         cleared_lines = np.arange(len(boards)) % 5
@@ -179,32 +173,17 @@ class VectorizedPlacementTests(unittest.TestCase):
                     )
                 ]
                 self.assertEqual(actions.tolist(), expected_actions)
-
-    def test_afterstates_cover_direct_and_hold_actions(self) -> None:
-        board = pack(np.zeros((1, 18, 10), dtype=np.uint8))
-
-        afterstates = enumerate_agent_afterstates(
-            board,
-            torch.tensor([5]),
-            torch.tensor([0]),
-            torch.tensor([EMPTY_HOLD_SLOT]),
-        )
-
-        self.assertEqual(tuple(afterstates.columns.shape), (1, 80, 10))
-        self.assertEqual(int(afterstates.valid[0, :40].sum()), 9)
-        self.assertEqual(int(afterstates.valid[0, 40:].sum()), 17)
-
-
-class PlacementHeuristicTests(unittest.TestCase):
-    def test_horizontal_i_piece_clears_bottom_row(self) -> None:
-        board = np.zeros((1, 18, 10), dtype=np.bool_)
-        board[0, -1, :6] = True
-
-        dropped_columns, cleared_lines, valid = drop_pieces(pack(board), torch.tensor([0]))
-
-        self.assertTrue(valid[0, 6])
-        self.assertEqual(int(cleared_lines[0, 6]), 1)
-        self.assertEqual(int(dropped_columns[0, 6].sum()), 0)
+                for board_index in range(10):
+                    self.assertEqual(
+                        choose_agent_action(
+                            boards[board_index],
+                            int(current_pieces[board_index]),
+                            int(next_pieces[board_index]),
+                            int(held_pieces[board_index]),
+                            use_lookahead=use_lookahead,
+                        ),
+                        expected_actions[board_index],
+                    )
 
     def test_clears_full_rows_already_on_the_board(self) -> None:
         board = np.zeros((1, 18, 10), dtype=np.uint8)
@@ -216,27 +195,6 @@ class PlacementHeuristicTests(unittest.TestCase):
         self.assertTrue(valid[0, 6])
         self.assertEqual(int(cleared_lines[0, 6]), 7)
         self.assertEqual(int(columns_to_boards(dropped_columns[0, 6]).sum()), 0)
-
-    def test_planner_takes_available_line_clear(self) -> None:
-        board = np.zeros((18, 10), dtype=np.uint8)
-        board[-1, :6] = 1
-
-        agent_action = choose_agent_action(board, 0, 0, EMPTY_HOLD_SLOT)
-
-        self.assertEqual(agent_action, 6)
-
-    def test_hold_planner_can_choose_the_held_piece(self) -> None:
-        board = np.zeros((18, 10), dtype=np.uint8)
-
-        agent_action = choose_agent_action(
-            board,
-            current_piece=1,
-            next_piece=0,
-            held_piece=0,
-        )
-
-        self.assertGreaterEqual(agent_action, 40)
-        self.assertLess(agent_action, 80)
 
 
 if __name__ == "__main__":

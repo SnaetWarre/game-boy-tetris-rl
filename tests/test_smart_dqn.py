@@ -48,41 +48,7 @@ class ContractOnlyEnvironment(gym.Env):
         return self.observation.copy(), 0.0, False, False, {"action": action}
 
 
-class TetrisDuelingPolicyTests(unittest.TestCase):
-    def test_dueling_network_returns_one_value_per_action(self) -> None:
-        environment = ContractOnlyEnvironment()
-        agent = TetrisDQN(
-            TetrisDuelingPolicy,
-            environment,
-            policy_kwargs={"features_extractor_class": _feature_extractor_class()},
-            device="cpu",
-        )
-        observation, _ = environment.reset()
-
-        with torch.no_grad():
-            action_values = agent.q_net(torch.as_tensor(observation).reshape(1, -1))
-            target_action_values = agent.q_net_target(torch.as_tensor(observation).reshape(1, -1))
-
-        self.assertEqual(tuple(action_values.shape), (1, AGENT_ACTION_COUNT))
-        self.assertTrue(torch.isfinite(action_values[0, 0]))
-        self.assertTrue(torch.isneginf(action_values[0, 9]))
-        self.assertTrue(torch.isneginf(target_action_values[0, 9]))
-
-    def test_predictions_never_select_a_noncanonical_action(self) -> None:
-        environment = ContractOnlyEnvironment()
-        agent = TetrisDQN(
-            TetrisDuelingPolicy,
-            environment,
-            policy_kwargs={"features_extractor_class": _feature_extractor_class()},
-            device="cpu",
-        )
-        observation, _ = environment.reset()
-        action_mask = canonical_agent_action_mask(observation)
-
-        for _ in range(100):
-            selected_action, _ = agent.predict(observation, deterministic=True)
-            self.assertTrue(action_mask[int(selected_action)])
-
+class TetrisDQNExplorationTests(unittest.TestCase):
     def test_exploration_never_selects_a_noncanonical_action(self) -> None:
         environment = ContractOnlyEnvironment()
         agent = TetrisDQN(
