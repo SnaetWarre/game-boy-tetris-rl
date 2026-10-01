@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import replace
 from importlib.metadata import PackageNotFoundError, version
 
 from gb_tetris_rl.agent.evaluation import (
@@ -99,17 +100,10 @@ def run_planner_command(command_arguments: argparse.Namespace) -> None:
 
 
 def run_train_command(command_arguments: argparse.Namespace) -> None:
-    training_config = TrainingConfig(
-        total_timesteps=command_arguments.timesteps,
-        seed=command_arguments.seed,
-        device=command_arguments.device,
-        environment_count=command_arguments.envs,
+    training_config = replace(
+        _training_config(command_arguments),
         show_window=command_arguments.window,
         emulation_speed=command_arguments.speed,
-        demonstration_count=command_arguments.demonstrations,
-        imitation_epoch_count=command_arguments.imitation_epochs,
-        demonstration_episode_piece_limit=command_arguments.demonstration_episode_pieces,
-        planner_lookahead=command_arguments.planner_lookahead,
     )
     training_artifacts = train_agent(
         command_arguments.rom,
@@ -123,21 +117,13 @@ def run_train_command(command_arguments: argparse.Namespace) -> None:
 
 
 def run_next_phase_command(command_arguments: argparse.Namespace) -> None:
-    training_config = TrainingConfig(
-        total_timesteps=command_arguments.timesteps,
-        seed=command_arguments.seed,
-        device=command_arguments.device,
-        environment_count=command_arguments.envs,
-        demonstration_count=command_arguments.demonstrations,
-        imitation_epoch_count=command_arguments.imitation_epochs,
-        demonstration_episode_piece_limit=command_arguments.demonstration_episode_pieces,
-        planner_lookahead=True,
-    )
+    training_config = _training_config(command_arguments)
     experiment_config = NeuralExperimentConfig(
         training=training_config,
         incumbent_model_path=command_arguments.incumbent_model,
         evaluation_episode_count=command_arguments.evaluation_episodes,
         evaluation_seed=command_arguments.evaluation_seed,
+        evaluation_target_lines=command_arguments.evaluation_target_lines,
         promote_qualifying_candidate=command_arguments.promote,
     )
     experiment_artifacts = run_neural_experiment(
@@ -230,6 +216,21 @@ def run_demo_command(command_arguments: argparse.Namespace) -> None:
         play_forever=command_arguments.forever,
     )
     _print_episode_summaries(episode_summaries)
+
+
+def _training_config(command_arguments: argparse.Namespace) -> TrainingConfig:
+    return TrainingConfig(
+        total_timesteps=command_arguments.timesteps,
+        seed=command_arguments.seed,
+        device=command_arguments.device,
+        environment_count=command_arguments.envs,
+        policy_architecture=command_arguments.policy,
+        demonstration_count=command_arguments.demonstrations,
+        imitation_epoch_count=command_arguments.imitation_epochs,
+        demonstration_episode_piece_limit=command_arguments.demonstration_episode_pieces,
+        planner_lookahead=command_arguments.planner_lookahead,
+        dagger_round_count=command_arguments.dagger_rounds,
+    )
 
 
 def _print_episode_summaries(episode_summaries: list[EpisodeSummary]) -> None:

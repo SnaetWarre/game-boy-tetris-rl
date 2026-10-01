@@ -79,17 +79,11 @@ class PlannerSafetyTests(unittest.TestCase):
             next_piece=0,
             held_piece=EMPTY_HOLD_SLOT,
         )
-        self.episode_info = {
-            "current_piece": 5,
-            "next_piece": 0,
-            "held_piece": EMPTY_HOLD_SLOT,
-        }
 
     def test_rescues_noncanonical_rotation(self) -> None:
         self.assertTrue(
             _action_requires_planner_rescue(
                 self.observation,
-                self.episode_info,
                 proposed_action=10,
             )
         )
@@ -98,10 +92,19 @@ class PlannerSafetyTests(unittest.TestCase):
         self.assertFalse(
             _action_requires_planner_rescue(
                 self.observation,
-                self.episode_info,
                 proposed_action=0,
             )
         )
+
+    def test_rescues_placement_that_leaves_the_next_piece_no_room(self) -> None:
+        # An O at the left wall lands in rows 0-1 and leaves only column 2
+        # open above the stack, where the next O cannot fit.
+        board = np.ones(BOARD_SHAPE, dtype=np.uint8)
+        board[:, 0] = 0
+        board[:2, :3] = 0
+        observation = encode_agent_observation(board, current_piece=5, next_piece=5, held_piece=6)
+
+        self.assertTrue(_action_requires_planner_rescue(observation, proposed_action=0))
 
 
 class StoppedEmulatorTests(unittest.TestCase):

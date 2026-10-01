@@ -87,6 +87,34 @@ class TrainingSmokeTests(unittest.TestCase):
             self.assertIsNotNone(training_artifacts.dqn_model_path)
             self.assertTrue(training_artifacts.dqn_model_path.is_file())
 
+    def test_imitation_only_run_never_boots_an_emulator(self) -> None:
+        training_config = TrainingConfig(
+            seed=3,
+            device="cpu",
+            demonstration_count=64,
+            imitation_epoch_count=1,
+            demonstration_episode_piece_limit=20,
+            dagger_round_count=1,
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            run_directory = Path(temporary_directory) / "imitation-run"
+            with patch(
+                "gb_tetris_rl.agent.training.TetrisEnvironment",
+                side_effect=AssertionError("imitation must not start PyBoy"),
+            ):
+                training_artifacts = train_agent("unused.gbc", run_directory, training_config)
+
+            self.assertIsNone(training_artifacts.dqn_model_path)
+            self.assertEqual(
+                training_artifacts.imitation_model_path,
+                run_directory.resolve() / "imitation.zip",
+            )
+            self.assertTrue(training_artifacts.imitation_model_path.is_file())
+
+    def test_rejects_unknown_policy_architecture(self) -> None:
+        with self.assertRaisesRegex(ValueError, "policy_architecture"):
+            train_agent("unused.gbc", "unused-run", TrainingConfig(policy_architecture="mlp"))
+
     def test_rejects_zero_parallel_environments(self) -> None:
         invalid_config = TrainingConfig(
             total_timesteps=12,

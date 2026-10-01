@@ -1,12 +1,19 @@
+import tempfile
 import unittest
 
 import gymnasium as gym
 import numpy as np
 import torch
 from gymnasium import spaces
+from stable_baselines3 import DQN
 
-from gb_tetris_rl.agent.action_masks import canonical_agent_action_mask
-from gb_tetris_rl.agent.smart_dqn import TetrisDQN, TetrisDuelingPolicy
+from gb_tetris_rl.agent.action_masks import (
+    canonical_agent_action_mask,
+    canonical_agent_action_masks,
+)
+from gb_tetris_rl.agent.imitation import generate_planner_demonstrations
+from gb_tetris_rl.agent.planner import decode_observations, enumerate_agent_afterstates
+from gb_tetris_rl.agent.smart_dqn import TetrisAfterstatePolicy, TetrisDQN, TetrisDuelingPolicy
 from gb_tetris_rl.game.contracts import (
     AGENT_ACTION_COUNT,
     AGENT_OBSERVATION_SHAPE,
@@ -111,6 +118,94 @@ class TetrisDuelingPolicyTests(unittest.TestCase):
             )
             self.assertTrue(action_mask[int(selected_actions[0])])
             np.testing.assert_array_equal(selected_actions, replay_actions)
+
+
+class TetrisAfterstatePolicyTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.agent = TetrisDQN(
+            TetrisAfterstatePolicy,
+            ContractOnlyEnvironment(),
+            buffer_size=1,
+            device="cpu",
+            seed=0,
+        )
+        self.observations = generate_planner_demonstrations(
+            32,
+            seed=5,
+            game_count=4,
+        ).observations
+
+    def test_scores_exactly_the_placements_that_fit(self) -> None:
+        observation_batch = decode_observations(torch.as_tensor(self.observations))
+        afterstates = enumerate_agent_afterstates(
+            observation_batch.columns,
+            observation_batch.current_pieces,
+            observation_batch.next_pieces,
+            observation_batch.held_pieces,
+        )
+
+        with torch.no_grad():
+            action_values = self.agent.q_net(torch.as_tensor(self.observations).float())
+
+        torch.testing.assert_close(torch.isfinite(action_values), afterstates.valid)
+
+    def test_predictions_always_fit(self) -> None:
+        actions, _ = self.agent.predict(self.observations, deterministic=True)
+
+        observation_batch = decode_observations(torch.as_tensor(self.observations))
+        valid = enumerate_agent_afterstates(
+            observation_batch.columns,
+            observation_batch.current_pieces,
+            observation_batch.next_pieces,
+            observation_batch.held_pieces,
+        ).valid
+        self.assertTrue(bool(valid[torch.arange(len(actions)), torch.as_tensor(actions)].all()))
+
+    def test_lost_board_keeps_finite_canonical_values(self) -> None:
+        board = np.ones(BOARD_SHAPE, dtype=np.uint8)
+        board[:, 4] = 0
+        observation = encode_agent_observation(board, 5, 5, 5)
+
+        with torch.no_grad():
+            action_values = self.agent.q_net(torch.as_tensor(observation)[None])
+
+        np.testing.assert_array_equal(
+            torch.isfinite(action_values[0]).numpy(),
+            canonical_agent_action_mask(observation),
+        )
+
+    def test_saved_policy_reloads_with_identical_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            model_path = f"{temporary_directory}/afterstate.zip"
+            self.agent.save(model_path)
+            reloaded_agent = DQN.load(model_path, device="cpu")
+
+        with torch.no_grad():
+            observations = torch.as_tensor(self.observations).float()
+            torch.testing.assert_close(
+                reloaded_agent.q_net(observations),
+                self.agent.q_net(observations),
+            )
+
+
+class LegacyActionMaskTests(unittest.TestCase):
+    def test_device_masks_match_the_numpy_contract(self) -> None:
+        observations = generate_planner_demonstrations(64, seed=6, game_count=8).observations
+        agent = TetrisDQN(
+            TetrisDuelingPolicy,
+            ContractOnlyEnvironment(),
+            policy_kwargs={"features_extractor_class": _feature_extractor_class()},
+            buffer_size=1,
+            device="cpu",
+        )
+
+        with torch.no_grad():
+            action_values = agent.q_net(torch.as_tensor(observations))
+
+        np.testing.assert_array_equal(
+            torch.isfinite(action_values).numpy(),
+            canonical_agent_action_masks(observations),
+        )
 
 
 def _feature_extractor_class():

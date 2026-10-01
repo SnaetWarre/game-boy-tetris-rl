@@ -67,34 +67,46 @@ committed. Train a replacement if it is missing.
 
 ## Where the agent learns
 
-The v0.3 policy has four parts:
+The v0.4 policy scores afterstates, the boards each action leaves behind:
 
-- a convolutional encoder that preserves the 18 by 10 board geometry
-- a separate encoder for current, next, and held-piece context
-- dueling value and action-advantage heads
-- canonical action masks that remove duplicate rotations and columns where a
-  piece cannot fit
+- a fixed bitboard simulator applies the game rules to all 80 actions and drops
+  any placement that does not fit from above the field
+- a convolutional encoder with full-height column filters reads each resulting
+  18 by 10 board
+- a value head combines those features with the cleared line count, the next
+  piece still to come, and the hold slot after the action
 
-The accepted training path is planner imitation:
+The simulator never learns and never chooses: it only says where a piece would
+land. The network learns how good each board is, and its highest-scoring board
+is the action. Placements that do not fit score negative infinity, so the
+policy cannot pick one.
+
+Training is planner imitation followed by DAgger:
 
 ```text
-deterministic planner
+deterministic planner (next-piece lookahead)
         |
-        | labels simulated board states
+        | labels boards from parallel simulated games
         v
 imitation pretraining                 src/gb_tetris_rl/agent/imitation.py
         |
-        | trains the spatial dueling policy
+        | the policy plays simulated games by itself;
+        | the planner labels every board it reaches (DAgger)
         v
   imitation.zip                       accepted checkpoint
 ```
 
-1. `generate_planner_demonstrations` simulates legal placements and records the
-   planner's chosen action for each board.
-2. `pretrain_policy_from_demonstrations` updates the policy network with
-   cross-entropy loss so it learns to copy those choices.
-3. Noncanonical action aliases are masked during both imitation and inference,
-   so the network spends capacity on distinct placements.
+1. `generate_planner_demonstrations` plays hundreds of simulated games in
+   parallel on the training device and records the planner's action for every
+   board.
+2. `pretrain_policy_from_demonstrations` trains the network with cross-entropy
+   loss so the planner's action scores highest.
+3. Each DAgger round lets the trained policy play, labels the boards it reaches
+   (including its own mistakes) with the planner, and retrains on the combined
+   data.
+
+The v0.3 direct-action dueling network is still available with
+`--policy dueling`, and older checkpoints still load.
 
 Emulator DQN fine-tuning remains available through `--timesteps`, but it is off
 by default. In the v0.3 acceptance run, 50,000 extra DQN steps reduced the
@@ -102,26 +114,37 @@ by default. In the v0.3 acceptance run, 50,000 extra DQN steps reduced the
 than promoted.
 
 The planner in `agent/planner.py` never learns. It is a deterministic baseline,
-a source of imitation labels, and an optional demo guard or override.
+a source of imitation labels, and an optional demo guard or override. A
+placement that leaves the known next piece nowhere to go now counts as a
+top-out in its lookahead instead of scoring as neutral.
 
 ## Train
 
 ```sh
-uv run gb-tetris-rl train \
-  --run-dir models/runs/spatial-imitation-v030 \
-  --demonstrations 50000 \
-  --imitation-epochs 80 \
-  --device cuda \
-  --envs 4
+uv run gb-tetris-rl train --run-dir models/runs/afterstate-v040 --device cuda
 ```
+
+The defaults generate 100,000 lookahead demonstrations from trajectories of up
+to 4,000 pieces, train for 10 epochs, then run one DAgger round of another
+100,000 boards. Imitation-only runs never start PyBoy. On an RTX 3060 laptop
+GPU, generating demonstrations takes a few seconds and the whole run takes a few
+minutes.
 
 Every run has an explicit artifact layout:
 
 ```text
-models/runs/spatial-imitation-v030/
-  imitation.zip       policy after planner imitation
+models/runs/afterstate-v040/
+  imitation.zip       policy after planner imitation and DAgger
   dqn-final.zip       only created when --timesteps is greater than zero
   dqn-checkpoints/    optional reinforcement-learning recovery checkpoints
+```
+
+To reproduce the v0.3 network instead:
+
+```sh
+uv run gb-tetris-rl train --policy dueling --demonstrations 50000 \
+  --imitation-epochs 80 --demonstration-episode-pieces 200 \
+  --no-planner-lookahead --dagger-rounds 0
 ```
 
 The project root keeps only `models/demo-agent.zip` as the canonical local demo
@@ -130,18 +153,18 @@ part of the runtime path.
 
 ### Next neural phase
 
-The dedicated experiment command trains a long-horizon candidate from planner
-demonstrations with next-piece lookahead, then evaluates it and the current
-neural checkpoint on the same 50 seeds:
+The experiment command trains a candidate with the same options as `train`,
+then evaluates it and the current neural checkpoint on the same 50 seeds:
 
 ```sh
 uv run gb-tetris-rl next-phase --device cuda
 ```
 
-Its default run uses 100,000 demonstrations, trajectories of up to 4,000
-pieces, 120 imitation epochs, and no DQN fine-tuning. The run directory contains
-the candidate model, separate incumbent and candidate evaluation reports, and
-`comparison.json` with model checksums and the promotion decision.
+Evaluation episodes stop at 500 lines (`--evaluation-target-lines`), because a
+strong policy would otherwise play until the 20,000-piece episode limit. The
+run directory contains the candidate model, separate incumbent and candidate
+evaluation reports, and `comparison.json` with model checksums and the
+promotion decision.
 
 The command never changes `models/demo-agent.zip` by default. Add `--promote`
 when you want it to replace the incumbent, and it will still do so only when the
@@ -152,9 +175,8 @@ evaluation:
 uv run gb-tetris-rl next-phase --device cuda --promote
 ```
 
-This is an experiment gate, not a guarantee that a larger imitation run will
-beat the current policy. DQN remains opt-in with `--timesteps` because the last
-validated fine-tuning run regressed.
+DQN remains opt-in with `--timesteps` because the last validated fine-tuning
+run regressed.
 
 ## Verified result
 
@@ -173,6 +195,12 @@ uv run gb-tetris-rl planner \
   --seed 10000
 ```
 
+Both the planner and the v0.4 neural policy currently stop near level 3000
+(about 7,500 pieces and 2,400 to 2,540 lines on seeds 10000 through 10002). On
+seed 10001 the planner's board is clean at level 3001 and tops out within ten
+pieces, so the ROM changes something there that the placement adapter does not
+handle yet. Treat roughly 2,400 lines as the current ceiling for any agent.
+
 Those are deterministic planner results used to validate the emulator action
 contract. They are a stronger source of imitation labels, not neural-only
 performance. The raw comparison is committed in
@@ -186,25 +214,31 @@ Neural-only evaluation on the same 50 deterministic seeds, 10000 through 10049:
 | --- | ---: | ---: | ---: | ---: |
 | Previous local agent | 2.18 | 2 | 1 | 5 |
 | v0.3 spatial imitation | 6.70 | 6 | 1 | 17 |
+| v0.4 afterstate imitation + DAgger | 500.06 | 500 | 500 | 501 |
 
-That is a 3.07 times increase in mean cleared lines for this fixed-seed test.
-The raw per-episode line counts and model checksums are committed in
-`docs/benchmarks/v0.3.0.json`. This establishes the strongest neural checkpoint
-tested in this repository, not a general Tetris record.
+The v0.4 run stopped every episode at a 500-line cap, so 500 is a floor, not
+the policy's limit: all 50 seeds reached it without planner help. The v0.3
+checkpoint scored 6.62 in the same run, because evaluation now loads models on
+the CPU and a few near-tied action values resolve differently than on CUDA.
+Raw per-episode counts and model checksums are committed in
+`docs/benchmarks/v0.3.0.json` and `docs/benchmarks/afterstate-v0.4.0.json`.
+This is the strongest neural checkpoint tested in this repository, not a
+general Tetris record.
 
 Evaluate checkpoints on fixed seeds before promoting one to the demo:
 
 ```sh
 # Honest neural-only result
 uv run gb-tetris-rl evaluate \
-  --model models/runs/spatial-imitation-v030/imitation.zip \
+  --model models/runs/afterstate-v040/imitation.zip \
   --episodes 50 \
   --seed 10000 \
-  --report models/runs/spatial-imitation-v030/neural-50-eval.json
+  --target-lines 500 \
+  --report models/runs/afterstate-v040/neural-50-eval.json
 
 # Hybrid result, reported separately
 uv run gb-tetris-rl evaluate \
-  --model models/runs/spatial-imitation-v030/imitation.zip \
+  --model models/runs/afterstate-v040/imitation.zip \
   --episodes 5 \
   --planner-safety \
   --target-lines 40
@@ -223,10 +257,10 @@ reward alone is not enough evidence that the policy learned useful play.
 ```text
 src/gb_tetris_rl/
   agent/
-    planner.py       pure board simulator and deterministic action planner
-    imitation.py     demonstration generation and imitation optimization
+    planner.py       batched bitboard simulator and deterministic action planner
+    imitation.py     parallel simulated games, demonstrations, DAgger, imitation
     action_masks.py  unique rotations and width-aware valid action masks
-    smart_dqn.py     spatial encoder and dueling policy network
+    smart_dqn.py     afterstate policy and the legacy dueling policy
     training.py      policy construction, training stages, checkpoints
     evaluation.py    neural-only and planner-guarded evaluation, GIF output
   game/

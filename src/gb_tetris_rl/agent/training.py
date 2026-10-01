@@ -1,8 +1,19 @@
+import time
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 
-from gb_tetris_rl.game.environment import TetrisEnvironment
+import gymnasium as gym
+
+from gb_tetris_rl.game.environment import (
+    TetrisEnvironment,
+    agent_action_space,
+    agent_observation_space,
+)
+
+POLICY_ARCHITECTURES = ("afterstate", "dueling")
+_IMITATION_BATCH_SIZE = 256
+_IMITATION_LEARNING_RATE = 1e-3
 
 
 @dataclass(frozen=True)
@@ -13,16 +24,32 @@ class TrainingConfig:
     environment_count: int = 4
     show_window: bool = False
     emulation_speed: int = 0
-    demonstration_count: int = 50_000
-    imitation_epoch_count: int = 80
-    demonstration_episode_piece_limit: int = 200
-    planner_lookahead: bool = False
+    policy_architecture: str = "afterstate"
+    demonstration_count: int = 100_000
+    imitation_epoch_count: int = 10
+    demonstration_episode_piece_limit: int = 4_000
+    planner_lookahead: bool = True
+    dagger_round_count: int = 1
 
 
 @dataclass(frozen=True)
 class TrainingArtifacts:
     imitation_model_path: Path | None
     dqn_model_path: Path | None
+
+
+class _ContractOnlyEnvironment(gym.Env):
+    """Agent spaces without an emulator, for runs that never step a game."""
+
+    def __init__(self) -> None:
+        self.observation_space = agent_observation_space()
+        self.action_space = agent_action_space()
+
+    def reset(self, *, seed=None, options=None):
+        raise RuntimeError("the contract-only environment cannot be reset")
+
+    def step(self, action):
+        raise RuntimeError("the contract-only environment cannot be stepped")
 
 
 def _create_monitored_environment(
@@ -49,7 +76,7 @@ def train_agent(
     run_directory: str | Path,
     config: TrainingConfig,
 ) -> TrainingArtifacts:
-    """Run planner imitation and optional DQN fine-tuning in the emulator."""
+    """Run planner imitation with DAgger, then optional DQN fine-tuning in the emulator."""
     _validate_training_config(config)
 
     try:
@@ -62,24 +89,36 @@ def train_agent(
     resolved_run_directory = Path(run_directory).expanduser().resolve()
     resolved_run_directory.mkdir(parents=True, exist_ok=True)
 
-    contract_check_environment = TetrisEnvironment(rom_path)
-    try:
-        check_env(contract_check_environment, warn=True)
-    finally:
-        contract_check_environment.close()
+    if config.total_timesteps:
+        contract_check_environment = TetrisEnvironment(rom_path)
+        try:
+            check_env(contract_check_environment, warn=True)
+        finally:
+            contract_check_environment.close()
+        training_environment = _create_training_environment(rom_path, config, SubprocVecEnv)
+    else:
+        # Imitation runs entirely in the bitboard simulator.
+        training_environment = _ContractOnlyEnvironment()
 
-    training_environment = _create_training_environment(rom_path, config, SubprocVecEnv)
     from gb_tetris_rl.agent.smart_dqn import (
+        TetrisAfterstatePolicy,
         TetrisDQN,
         TetrisDuelingPolicy,
         TetrisFeatureExtractor,
     )
 
+    if config.policy_architecture == "afterstate":
+        policy_class = TetrisAfterstatePolicy
+        policy_kwargs = {"net_arch": [256, 256]}
+    else:
+        policy_class = TetrisDuelingPolicy
+        policy_kwargs = {"features_extractor_class": TetrisFeatureExtractor, "net_arch": [256]}
+
     dqn_agent = TetrisDQN(
-        TetrisDuelingPolicy,
+        policy_class,
         training_environment,
         learning_rate=1e-4,
-        buffer_size=500_000,
+        buffer_size=500_000 if config.total_timesteps else 1,
         learning_starts=min(25_000, max(1_000, config.total_timesteps // 20)),
         batch_size=512,
         gamma=0.99,
@@ -89,10 +128,7 @@ def train_agent(
         exploration_fraction=0.25,
         exploration_initial_eps=0.15 if config.demonstration_count else 1.0,
         exploration_final_eps=0.02 if config.demonstration_count else 0.05,
-        policy_kwargs={
-            "features_extractor_class": TetrisFeatureExtractor,
-            "net_arch": [256],
-        },
+        policy_kwargs=policy_kwargs,
         verbose=1,
         seed=config.seed,
         device=config.device,
@@ -162,23 +198,52 @@ def _run_imitation_stage(
 ):
     from gb_tetris_rl.agent.imitation import (
         generate_planner_demonstrations,
+        greedy_policy,
         pretrain_policy_from_demonstrations,
     )
 
+    def collect_demonstrations(seed: int, behaviour_policy=None):
+        started_at = time.perf_counter()
+        demonstration_dataset = generate_planner_demonstrations(
+            config.demonstration_count,
+            seed=seed,
+            maximum_episode_pieces=config.demonstration_episode_piece_limit,
+            use_lookahead=config.planner_lookahead,
+            device=dqn_agent.device,
+            behaviour_policy=behaviour_policy,
+        )
+        print(f"Collected in {time.perf_counter() - started_at:.1f}s")
+        return demonstration_dataset
+
     print(f"Generating {config.demonstration_count:,} planner demonstrations...")
-    demonstration_dataset = generate_planner_demonstrations(
-        config.demonstration_count,
-        seed=config.seed,
-        maximum_episode_pieces=config.demonstration_episode_piece_limit,
-        use_lookahead=config.planner_lookahead,
-    )
+    demonstration_dataset = collect_demonstrations(config.seed)
     imitation_metrics = pretrain_policy_from_demonstrations(
         dqn_agent,
         demonstration_dataset,
         epoch_count=config.imitation_epoch_count,
-        batch_size=2_048,
+        batch_size=_IMITATION_BATCH_SIZE,
         seed=config.seed,
+        learning_rate=_IMITATION_LEARNING_RATE,
     )
+    for dagger_round in range(1, config.dagger_round_count + 1):
+        print(
+            f"DAgger round {dagger_round}/{config.dagger_round_count}: planner labels "
+            f"{config.demonstration_count:,} boards the policy reaches by itself..."
+        )
+        demonstration_dataset = demonstration_dataset.concatenate(
+            collect_demonstrations(
+                config.seed + dagger_round,
+                behaviour_policy=greedy_policy(dqn_agent.q_net),
+            )
+        )
+        imitation_metrics = pretrain_policy_from_demonstrations(
+            dqn_agent,
+            demonstration_dataset,
+            epoch_count=max(1, config.imitation_epoch_count // 2),
+            batch_size=_IMITATION_BATCH_SIZE,
+            seed=config.seed + dagger_round,
+            learning_rate=_IMITATION_LEARNING_RATE / 2,
+        )
     print(
         "Imitation pretraining complete: "
         f"validation_accuracy={imitation_metrics.validation_accuracy:.1%}"
@@ -195,12 +260,16 @@ def _validate_training_config(config: TrainingConfig) -> None:
         raise ValueError("total_timesteps cannot be negative")
     if config.environment_count < 1:
         raise ValueError("environment_count must be at least 1")
+    if config.policy_architecture not in POLICY_ARCHITECTURES:
+        raise ValueError(f"policy_architecture must be one of {', '.join(POLICY_ARCHITECTURES)}")
     if config.demonstration_count < 0:
         raise ValueError("demonstration_count cannot be negative")
     if config.imitation_epoch_count < 0:
         raise ValueError("imitation_epoch_count cannot be negative")
     if config.demonstration_episode_piece_limit < 1:
         raise ValueError("demonstration_episode_piece_limit must be at least 1")
+    if config.dagger_round_count < 0:
+        raise ValueError("dagger_round_count cannot be negative")
     if (config.demonstration_count == 0) != (config.imitation_epoch_count == 0):
         raise ValueError(
             "demonstration_count and imitation_epoch_count must both be zero or positive"

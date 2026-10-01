@@ -37,6 +37,7 @@ class NeuralExperimentConfig:
     incumbent_model_path: Path
     evaluation_episode_count: int = 50
     evaluation_seed: int = 10_000
+    evaluation_target_lines: int | None = 500
     promote_qualifying_candidate: bool = False
 
 
@@ -57,12 +58,16 @@ def run_neural_experiment(
 ) -> NeuralExperimentArtifacts:
     if config.evaluation_episode_count < 1:
         raise ValueError("evaluation_episode_count must be at least 1")
+    if config.evaluation_target_lines is not None and config.evaluation_target_lines < 1:
+        raise ValueError("evaluation_target_lines must be at least 1")
 
     resolved_run_directory = Path(run_directory).expanduser().resolve()
     resolved_run_directory.mkdir(parents=True, exist_ok=True)
     resolved_incumbent_model_path = config.incumbent_model_path.expanduser().resolve()
     if not resolved_incumbent_model_path.is_file():
         raise ValueError(f"incumbent model file does not exist: {resolved_incumbent_model_path}")
+    if resolved_run_directory in resolved_incumbent_model_path.parents:
+        raise ValueError("the incumbent model must live outside the candidate run directory")
     incumbent_sha256_before_experiment = _file_sha256(resolved_incumbent_model_path)
 
     training_artifacts = train_agent(rom_path, resolved_run_directory, config.training)
@@ -73,8 +78,6 @@ def run_neural_experiment(
     )
     if candidate_model_path is None:
         raise RuntimeError("training completed without producing a candidate model")
-    if candidate_model_path.resolve() == resolved_incumbent_model_path:
-        raise ValueError("candidate and incumbent model paths must be different")
 
     print("Evaluating incumbent neural policy...")
     incumbent_episode_summaries = evaluate_agent(
@@ -83,6 +86,7 @@ def run_neural_experiment(
         episode_count=config.evaluation_episode_count,
         show_window=False,
         seed=config.evaluation_seed,
+        target_lines=config.evaluation_target_lines,
     )
     incumbent_report_path = write_evaluation_report(
         incumbent_episode_summaries,
@@ -99,6 +103,7 @@ def run_neural_experiment(
         episode_count=config.evaluation_episode_count,
         show_window=False,
         seed=config.evaluation_seed,
+        target_lines=config.evaluation_target_lines,
     )
     candidate_report_path = write_evaluation_report(
         candidate_episode_summaries,
@@ -124,6 +129,7 @@ def run_neural_experiment(
         "training": asdict(config.training),
         "evaluation_episode_count": config.evaluation_episode_count,
         "evaluation_seed": config.evaluation_seed,
+        "evaluation_target_lines": config.evaluation_target_lines,
         "incumbent": {
             "model": str(resolved_incumbent_model_path),
             "sha256_before_experiment": incumbent_sha256_before_experiment,

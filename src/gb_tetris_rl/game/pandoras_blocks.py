@@ -72,13 +72,12 @@ class PandorasBlocksAdapter:
         self._pyboy.save_state(initial_state_buffer)
         self._initial_state_bytes = initial_state_buffer.getvalue()
 
-    def reset(self, seed: int | None) -> None:
+    def reset(self, seed: int) -> None:
         self._pyboy.load_state(BytesIO(self._initial_state_bytes))
-        if seed is not None:
-            normalized_seed = seed & 0xFFFFFFFF
-            for byte_offset in range(4):
-                seed_byte = (normalized_seed >> (byte_offset * 8)) & 0xFF
-                self._pyboy.memory[self._RNG_SEED_ADDRESS + byte_offset] = seed_byte
+        normalized_seed = seed & 0xFFFFFFFF
+        for byte_offset in range(4):
+            seed_byte = (normalized_seed >> (byte_offset * 8)) & 0xFF
+            self._pyboy.memory[self._RNG_SEED_ADDRESS + byte_offset] = seed_byte
 
         self._cleared_line_total = 0
         self._current_clear_was_counted = False

@@ -4,17 +4,22 @@ from itertools import count
 from pathlib import Path
 
 import numpy as np
+import torch
 from numpy.typing import NDArray
 
-from gb_tetris_rl.agent.planner import choose_agent_action, enumerate_placements
+from gb_tetris_rl.agent.planner import (
+    choose_agent_actions,
+    decode_observations,
+    drop_pieces,
+    enumerate_agent_afterstates,
+)
 from gb_tetris_rl.game.contracts import (
     AGENT_ACTION_COUNT,
     AGENT_OBSERVATION_SHAPE,
     DIRECT_PLACEMENT_ACTION_COUNT,
     EMPTY_HOLD_SLOT,
+    AgentObservation,
     EpisodeInfo,
-    board_from_observation,
-    decode_agent_action,
 )
 from gb_tetris_rl.game.environment import TetrisEnvironment
 
@@ -78,12 +83,11 @@ def evaluate_agent(
                 predicted_action, _ = dqn_agent.predict(observation, deterministic=True)
                 selected_action = int(np.asarray(predicted_action).item())
                 if use_planner_safety or use_planner_override:
-                    planner_action = _choose_safe_action(observation, episode_info)
+                    planner_action = _choose_safe_action(observation)
                     if planner_action != selected_action:
                         planner_disagreement_count += 1
                         action_requires_rescue = _action_requires_planner_rescue(
                             observation,
-                            episode_info,
                             selected_action,
                         )
                         if use_planner_override or action_requires_rescue:
@@ -147,7 +151,8 @@ def _load_compatible_agent(model_path: str | Path):
     resolved_model_path = Path(model_path).expanduser().resolve()
     if not resolved_model_path.is_file():
         raise ValueError(f"model file does not exist: {resolved_model_path}")
-    dqn_agent = DQN.load(str(resolved_model_path))
+    # One observation per step: CPU inference beats GPU launch and copy overhead.
+    dqn_agent = DQN.load(str(resolved_model_path), device="cpu")
 
     observation_shape = dqn_agent.observation_space.shape
     action_count = getattr(dqn_agent.action_space, "n", None)
@@ -159,39 +164,44 @@ def _load_compatible_agent(model_path: str | Path):
     return dqn_agent
 
 
-def _choose_safe_action(observation, episode_info: EpisodeInfo) -> int:
-    return choose_agent_action(
-        board_from_observation(observation),
-        episode_info["current_piece"],
-        episode_info["next_piece"],
-        episode_info["held_piece"],
+def _choose_safe_action(observation: AgentObservation) -> int:
+    observation_batch = decode_observations(torch.as_tensor(observation)[None])
+    return int(
+        choose_agent_actions(
+            observation_batch.columns,
+            observation_batch.current_pieces,
+            observation_batch.next_pieces,
+            observation_batch.held_pieces,
+        )[0]
     )
 
 
 def _action_requires_planner_rescue(
-    observation,
-    episode_info: EpisodeInfo,
+    observation: AgentObservation,
     proposed_action: int,
 ) -> bool:
-    placement_decision = decode_agent_action(proposed_action)
-    direct_placement_action = proposed_action % DIRECT_PLACEMENT_ACTION_COUNT
-    piece_to_place = episode_info["current_piece"]
-    if placement_decision.uses_hold:
-        piece_to_place = (
-            episode_info["next_piece"]
-            if episode_info["held_piece"] == EMPTY_HOLD_SLOT
-            else episode_info["held_piece"]
-        )
-    matching_placements = [
-        placement
-        for placement in enumerate_placements(board_from_observation(observation), piece_to_place)
-        if placement.placement_action == direct_placement_action
-    ]
-    if not matching_placements:
+    """True when the action does not fit or leaves the known next piece no room."""
+    observation_batch = decode_observations(torch.as_tensor(observation)[None])
+    afterstates = enumerate_agent_afterstates(
+        observation_batch.columns,
+        observation_batch.current_pieces,
+        observation_batch.next_pieces,
+        observation_batch.held_pieces,
+    )
+    if not bool(afterstates.valid[0, proposed_action]):
         return True
-    if placement_decision.uses_hold and episode_info["held_piece"] == EMPTY_HOLD_SLOT:
+    holds_from_empty_slot = (
+        proposed_action >= DIRECT_PLACEMENT_ACTION_COUNT
+        and int(observation_batch.held_pieces[0]) == EMPTY_HOLD_SLOT
+    )
+    if holds_from_empty_slot:
+        # Holding into an empty slot consumes the known next piece.
         return False
-    return not enumerate_placements(matching_placements[0].board, episode_info["next_piece"])
+    _, _, next_piece_fits = drop_pieces(
+        afterstates.columns[0, proposed_action][None],
+        observation_batch.next_pieces,
+    )
+    return not bool(next_piece_fits.any())
 
 
 def _summarize_episode(

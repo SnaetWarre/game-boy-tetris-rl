@@ -56,7 +56,7 @@ class FakePandorasBlocksAdapter:
         self.last_placement: tuple[int, int, bool, bool] | None = None
         FakePandorasBlocksAdapter.latest_instance = self
 
-    def reset(self, seed: int | None) -> None:
+    def reset(self, seed: int) -> None:
         self.seed = seed
 
     def read_board(self) -> np.ndarray:
@@ -118,6 +118,26 @@ class EnvironmentContractTests(unittest.TestCase):
         self.assertFalse(truncated)
         self.assertEqual(adapter.seed, 513)
         self.assertEqual(adapter.last_placement, (1, 3, True, False))
+
+    def test_unseeded_resets_start_new_reproducible_games(self) -> None:
+        def unseeded_game_seeds() -> list[int]:
+            environment = create_environment()
+            try:
+                environment.reset(seed=3)
+                adapter = FakePandorasBlocksAdapter.latest_instance
+                assert adapter is not None
+                game_seeds = []
+                for _ in range(3):
+                    environment.reset()
+                    game_seeds.append(adapter.seed)
+                return game_seeds
+            finally:
+                environment.close()
+
+        first_game_seeds = unseeded_game_seeds()
+
+        self.assertEqual(len(set(first_game_seeds)), 3)
+        self.assertEqual(first_game_seeds, unseeded_game_seeds())
 
     def test_headless_worker_can_share_human_render_mode(self) -> None:
         environment = create_environment(

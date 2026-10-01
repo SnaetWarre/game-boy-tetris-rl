@@ -1,56 +1,61 @@
-from functools import cache
-
 import numpy as np
+import torch
 from numpy.typing import NDArray
 
-from gb_tetris_rl.agent.planner import PANDORAS_PIECE_ROTATIONS
+from gb_tetris_rl.agent.planner import canonical_direct_action_masks
 from gb_tetris_rl.game.contracts import (
-    AGENT_ACTION_COUNT,
-    BOARD_COLUMNS,
-    DIRECT_PLACEMENT_ACTION_COUNT,
+    AGENT_OBSERVATION_SHAPE,
+    BOARD_CELL_COUNT,
     EMPTY_HOLD_SLOT,
+    TETROMINO_TYPE_COUNT,
     AgentObservation,
-    piece_context_from_observation,
 )
 
 ActionMask = NDArray[np.bool_]
 
 
-@cache
-def _canonical_direct_action_mask(piece_type: int) -> ActionMask:
-    action_mask = np.zeros(DIRECT_PLACEMENT_ACTION_COUNT, dtype=np.bool_)
-    seen_piece_shapes = set()
-    for rotation, piece_shape in enumerate(PANDORAS_PIECE_ROTATIONS[piece_type]):
-        if piece_shape in seen_piece_shapes:
-            continue
-        seen_piece_shapes.add(piece_shape)
-        piece_width = max(column_offset for _, column_offset in piece_shape) + 1
-        for left_column in range(BOARD_COLUMNS - piece_width + 1):
-            action_mask[rotation * BOARD_COLUMNS + left_column] = True
-    action_mask.setflags(write=False)
-    return action_mask
+def canonical_agent_action_mask_tensor(
+    current_pieces: torch.Tensor,
+    next_pieces: torch.Tensor,
+    held_pieces: torch.Tensor,
+) -> torch.Tensor:
+    """Return [N, 80] masks of unique, in-bounds direct and hold placements."""
+    pieces_after_hold = torch.where(held_pieces == EMPTY_HOLD_SLOT, next_pieces, held_pieces)
+    return torch.cat(
+        (
+            canonical_direct_action_masks(current_pieces),
+            canonical_direct_action_masks(pieces_after_hold),
+        ),
+        dim=1,
+    )
 
 
 def canonical_agent_action_mask(observation: AgentObservation) -> ActionMask:
-    piece_context = piece_context_from_observation(observation)
-    piece_after_hold = (
-        piece_context.next_piece
-        if piece_context.held_piece == EMPTY_HOLD_SLOT
-        else piece_context.held_piece
-    )
-    action_mask = np.zeros(AGENT_ACTION_COUNT, dtype=np.bool_)
-    action_mask[:DIRECT_PLACEMENT_ACTION_COUNT] = _canonical_direct_action_mask(
-        piece_context.current_piece
-    )
-    action_mask[DIRECT_PLACEMENT_ACTION_COUNT:] = _canonical_direct_action_mask(piece_after_hold)
-    return action_mask
+    return canonical_agent_action_masks(observation)
 
 
 def canonical_agent_action_masks(observations: NDArray[np.generic]) -> ActionMask:
     observation_batch = np.asarray(observations)
-    if observation_batch.ndim == 1:
-        return canonical_agent_action_mask(observation_batch)
-    return np.stack(
-        [canonical_agent_action_mask(observation) for observation in observation_batch],
-        axis=0,
-    )
+    is_single_observation = observation_batch.ndim == 1
+    observation_batch = np.atleast_2d(observation_batch)
+    if observation_batch.shape[1:] != AGENT_OBSERVATION_SHAPE:
+        raise ValueError(
+            f"expected observation shape {AGENT_OBSERVATION_SHAPE}, "
+            f"received {observation_batch.shape[1:]}"
+        )
+
+    next_piece_start = BOARD_CELL_COUNT + TETROMINO_TYPE_COUNT
+    held_piece_start = next_piece_start + TETROMINO_TYPE_COUNT
+    piece_indices = []
+    for context_name, start, stop in (
+        ("current piece", BOARD_CELL_COUNT, next_piece_start),
+        ("next piece", next_piece_start, held_piece_start),
+        ("held piece", held_piece_start, AGENT_OBSERVATION_SHAPE[0]),
+    ):
+        encoded_values = observation_batch[:, start:stop]
+        if np.any(np.count_nonzero(encoded_values, axis=1) != 1):
+            raise ValueError(f"observation must encode exactly one {context_name}")
+        piece_indices.append(torch.as_tensor(encoded_values.argmax(axis=1)))
+
+    action_masks = canonical_agent_action_mask_tensor(*piece_indices).numpy()
+    return action_masks[0] if is_single_observation else action_masks

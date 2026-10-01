@@ -1,0 +1,37 @@
+{
+  "version": "0.4.0",
+  "evaluated_on": "2026-10-01",
+  "mode": "learned policy only",
+  "starting_seed": 10000,
+  "episode_count": 50,
+  "target_lines_cap": 500,
+  "acceptance_metric": "cleared_lines",
+  "incumbent_v030_spatial_imitation": {
+    "sha256": "c53d0ebd33d695dbdb756b19982c6a6a613d8dc42cd045cfd62b38ec5734e52a",
+    "mean": 6.62,
+    "median": 6.0,
+    "minimum": 1,
+    "maximum": 17,
+    "episodes": [9, 4, 5, 3, 5, 6, 9, 11, 15, 9, 12, 17, 7, 10, 3, 5, 5, 4, 3, 8, 1, 10, 3, 6, 7, 9, 4, 4, 12, 6, 4, 10, 2, 4, 8, 8, 11, 4, 5, 11, 2, 3, 8, 6, 5, 7, 6, 8, 4, 3],
+    "inference_device": "cpu"
+  },
+  "accepted_afterstate_imitation": {
+    "sha256": "682faa4df1a771ff8f8753a0469901bd75afdf87cd965028a337765d4f94c62a",
+    "mean": 500.06,
+    "median": 500.0,
+    "minimum": 500,
+    "maximum": 501,
+    "episodes": [500, 500, 500, 500, 500, 500, 500, 500, 500, 501, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 501, 500, 500, 500, 501, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500],
+    "training": {
+      "policy_architecture": "afterstate",
+      "demonstration_count": 100000,
+      "imitation_epoch_count": 10,
+      "demonstration_episode_piece_limit": 4000,
+      "planner_lookahead": true,
+      "dagger_round_count": 1,
+      "seed": 0
+    },
+    "validation_accuracy": 0.793,
+    "pieces_per_episode": [1552, 1571, 1526, 1554, 1594, 1607, 1567, 1529, 1554, 1586, 1532, 1534, 1539, 1581, 1594, 1521, 1553, 1594, 1529, 1549, 1524, 1507, 1539, 1530, 1546, 1538, 1561, 1551, 1586, 1556, 1543, 1527, 1540, 1589, 1556, 1535, 1538, 1605, 1542, 1524, 1536, 1604, 1556, 1552, 1556, 1516, 1535, 1549, 1535, 1604]
+  }
+}

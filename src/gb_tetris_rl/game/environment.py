@@ -20,6 +20,14 @@ from gb_tetris_rl.game.rewards import TetrisSnapshot, calculate_transition_rewar
 from gb_tetris_rl.game.rom import validate_pandoras_blocks_rom
 
 
+def agent_observation_space() -> spaces.Box:
+    return spaces.Box(low=0, high=2, shape=AGENT_OBSERVATION_SHAPE, dtype=np.uint8)
+
+
+def agent_action_space() -> spaces.Discrete:
+    return spaces.Discrete(AGENT_ACTION_COUNT)
+
+
 class TetrisEnvironment(gym.Env[AgentObservation, int]):
     """The single Gymnasium contract used by both training and evaluation."""
 
@@ -70,13 +78,8 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
         self._previous_snapshot = self._capture_snapshot()
         self._is_closed = False
 
-        self.action_space = spaces.Discrete(AGENT_ACTION_COUNT)
-        self.observation_space = spaces.Box(
-            low=0,
-            high=2,
-            shape=AGENT_OBSERVATION_SHAPE,
-            dtype=np.uint8,
-        )
+        self.action_space = agent_action_space()
+        self.observation_space = agent_observation_space()
 
     def reset(
         self,
@@ -87,7 +90,10 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
         del options
         super().reset(seed=seed)
         self.action_space.seed(seed)
-        self._game.reset(seed)
+        # Unseeded resets (vectorized auto-resets) must still start new games,
+        # so draw the ROM seed from the environment's own seeded generator.
+        game_seed = seed if seed is not None else int(self.np_random.integers(1 << 32))
+        self._game.reset(game_seed)
         self._episode_step_count = 0
         self._previous_snapshot = self._capture_snapshot()
         return self._observe(), self._build_episode_info(self._previous_snapshot)

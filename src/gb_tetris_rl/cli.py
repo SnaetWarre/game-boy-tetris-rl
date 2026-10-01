@@ -3,6 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+from gb_tetris_rl.agent.training import POLICY_ARCHITECTURES
 from gb_tetris_rl.commands import (
     run_bootstrap_command,
     run_demo_command,
@@ -133,37 +134,11 @@ def _add_planner_command(command_parsers) -> None:
 def _add_train_command(command_parsers) -> None:
     train_parser = command_parsers.add_parser(
         "train",
-        help="run planner imitation with optional DQN fine-tuning",
+        help="run planner imitation with DAgger and optional DQN fine-tuning",
     )
     _add_rom_argument(train_parser)
     train_parser.add_argument("--run-dir", type=Path, default=Path("models/runs/latest"))
-    train_parser.add_argument(
-        "--timesteps",
-        type=_nonnegative_integer,
-        default=0,
-        help="optional emulator DQN steps; disabled by default because validation regressed",
-    )
-    train_parser.add_argument("--demonstrations", type=_nonnegative_integer, default=50_000)
-    train_parser.add_argument("--imitation-epochs", type=_nonnegative_integer, default=80)
-    train_parser.add_argument(
-        "--demonstration-episode-pieces",
-        type=_positive_integer,
-        default=200,
-        help="maximum simulated planner trajectory length (default: 200)",
-    )
-    train_parser.add_argument(
-        "--planner-lookahead",
-        action="store_true",
-        help="label demonstrations with the planner's next-piece lookahead",
-    )
-    train_parser.add_argument("--seed", type=int, default=0)
-    train_parser.add_argument("--device", default="auto")
-    train_parser.add_argument(
-        "--envs",
-        type=_positive_integer,
-        default=4,
-        help="parallel PyBoy workers feeding the shared DQN",
-    )
+    _add_training_arguments(train_parser)
     train_parser.add_argument("--window", action="store_true")
     train_parser.add_argument(
         "--speed",
@@ -177,7 +152,7 @@ def _add_train_command(command_parsers) -> None:
 def _add_next_phase_command(command_parsers) -> None:
     experiment_parser = command_parsers.add_parser(
         "next-phase",
-        help="train and gate a long-horizon neural candidate against the incumbent",
+        help="train and gate a neural candidate against the incumbent",
     )
     _add_rom_argument(experiment_parser)
     experiment_parser.add_argument(
@@ -192,41 +167,18 @@ def _add_next_phase_command(command_parsers) -> None:
         default=DEFAULT_DEMO_MODEL_PATH,
         help=f"current model to beat (default: {DEFAULT_DEMO_MODEL_PATH})",
     )
-    experiment_parser.add_argument(
-        "--demonstrations",
-        type=_positive_integer,
-        default=100_000,
-    )
-    experiment_parser.add_argument(
-        "--imitation-epochs",
-        type=_positive_integer,
-        default=120,
-    )
-    experiment_parser.add_argument(
-        "--demonstration-episode-pieces",
-        type=_positive_integer,
-        default=4_000,
-        help="maximum pieces per long-horizon planner trajectory (default: 4000)",
-    )
-    experiment_parser.add_argument(
-        "--timesteps",
-        type=_nonnegative_integer,
-        default=0,
-        help="optional DQN fine-tuning after imitation; disabled by default",
-    )
-    experiment_parser.add_argument("--seed", type=int, default=0)
+    _add_training_arguments(experiment_parser)
     experiment_parser.add_argument("--evaluation-seed", type=int, default=10_000)
     experiment_parser.add_argument(
         "--evaluation-episodes",
         type=_positive_integer,
         default=50,
     )
-    experiment_parser.add_argument("--device", default="auto")
     experiment_parser.add_argument(
-        "--envs",
+        "--evaluation-target-lines",
         type=_positive_integer,
-        default=4,
-        help="parallel PyBoy workers used if DQN fine-tuning is enabled",
+        default=500,
+        help="end each evaluation episode at this many lines (default: 500)",
     )
     experiment_parser.add_argument(
         "--promote",
@@ -234,6 +186,49 @@ def _add_next_phase_command(command_parsers) -> None:
         help="replace the incumbent only if candidate mean improves and median does not regress",
     )
     experiment_parser.set_defaults(command_runner=run_next_phase_command)
+
+
+def _add_training_arguments(command_parser: argparse.ArgumentParser) -> None:
+    command_parser.add_argument(
+        "--policy",
+        choices=POLICY_ARCHITECTURES,
+        default="afterstate",
+        help="afterstate scores the board each placement leaves; dueling is the v0.3 network",
+    )
+    command_parser.add_argument(
+        "--timesteps",
+        type=_nonnegative_integer,
+        default=0,
+        help="optional emulator DQN steps; disabled by default because validation regressed",
+    )
+    command_parser.add_argument("--demonstrations", type=_nonnegative_integer, default=100_000)
+    command_parser.add_argument("--imitation-epochs", type=_nonnegative_integer, default=10)
+    command_parser.add_argument(
+        "--demonstration-episode-pieces",
+        type=_positive_integer,
+        default=4_000,
+        help="maximum simulated trajectory length (default: 4000)",
+    )
+    command_parser.add_argument(
+        "--planner-lookahead",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="label demonstrations with the planner's next-piece lookahead (default: on)",
+    )
+    command_parser.add_argument(
+        "--dagger-rounds",
+        type=_nonnegative_integer,
+        default=1,
+        help="rounds of planner labels on boards the policy reaches by itself (default: 1)",
+    )
+    command_parser.add_argument("--seed", type=int, default=0)
+    command_parser.add_argument("--device", default="auto")
+    command_parser.add_argument(
+        "--envs",
+        type=_positive_integer,
+        default=4,
+        help="parallel PyBoy workers used if DQN fine-tuning is enabled",
+    )
 
 
 def _add_evaluate_command(command_parsers) -> None:
