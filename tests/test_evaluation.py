@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
-from PIL import Image
+from PIL import GifImagePlugin, Image
 
 from gb_tetris_rl.agent.evaluation import (
     EpisodeSummary,
@@ -27,6 +27,7 @@ class GifRecordingTests(unittest.TestCase):
             _write_gif(frames, recording_path, frame_duration_ms=50)
 
             with Image.open(recording_path) as recorded_gif:
+                assert isinstance(recorded_gif, GifImagePlugin.GifImageFile)
                 self.assertEqual(recorded_gif.n_frames, 3)
                 self.assertEqual(recorded_gif.info["duration"], 50)
 

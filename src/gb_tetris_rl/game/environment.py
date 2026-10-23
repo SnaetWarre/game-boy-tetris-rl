@@ -59,7 +59,7 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
             raise ValueError("emulation_speed cannot be negative")
 
         validated_rom = validate_pandoras_blocks_rom(rom_path)
-        pyboy_options: dict[str, str | bool] = {
+        pyboy_options: dict[str, Any] = {
             "window": "SDL2" if display_emulator_window else "null",
             "sound_emulated": False,
         }
@@ -82,7 +82,8 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
         self.action_space = agent_action_space()
         self.observation_space = agent_observation_space()
 
-    def reset(
+    # EpisodeInfo is a TypedDict, which pyright won't match to Gymnasium's dict[str, Any].
+    def reset(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         *,
         seed: int | None = None,
@@ -99,7 +100,7 @@ class TetrisEnvironment(gym.Env[AgentObservation, int]):
         self._previous_snapshot = self._capture_snapshot()
         return self._observe(), self._build_episode_info(self._previous_snapshot)
 
-    def step(
+    def step(  # pyright: ignore[reportIncompatibleMethodOverride]
         self,
         action: int,
     ) -> tuple[AgentObservation, float, bool, bool, EpisodeInfo]:

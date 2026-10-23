@@ -84,7 +84,7 @@ class TrainingSmokeTests(unittest.TestCase):
                 training_artifacts.dqn_model_path,
                 run_directory.resolve() / "dqn-final.zip",
             )
-            self.assertIsNotNone(training_artifacts.dqn_model_path)
+            assert training_artifacts.dqn_model_path is not None
             self.assertTrue(training_artifacts.dqn_model_path.is_file())
 
     def test_imitation_only_run_never_boots_an_emulator(self) -> None:
@@ -109,6 +109,7 @@ class TrainingSmokeTests(unittest.TestCase):
                 training_artifacts.imitation_model_path,
                 run_directory.resolve() / "imitation.zip",
             )
+            assert training_artifacts.imitation_model_path is not None
             self.assertTrue(training_artifacts.imitation_model_path.is_file())
 
     def test_rejects_unknown_policy_architecture(self) -> None:
