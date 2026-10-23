@@ -88,14 +88,15 @@ class DuelingQNetwork(QNetwork):
         )
         del self.q_net
 
-    def forward(self, observations) -> torch.Tensor:
-        extracted_features = self.extract_features(observations, self.features_extractor)
+    def forward(self, obs) -> torch.Tensor:
+        assert isinstance(obs, torch.Tensor), "Tetris observations are a single Box tensor"
+        extracted_features = self.extract_features(obs, self.features_extractor)
         state_values = self.state_value_network(extracted_features)
         action_advantages = self.action_advantage_network(extracted_features)
         action_values = (
             state_values + action_advantages - action_advantages.mean(dim=1, keepdim=True)
         )
-        observation_batch = decode_observations(observations)
+        observation_batch = decode_observations(obs)
         action_masks = canonical_agent_action_mask_tensor(
             observation_batch.current_pieces,
             observation_batch.next_pieces,
@@ -135,8 +136,9 @@ class AfterstateQNetwork(QNetwork):
             )
         )
 
-    def forward(self, observations) -> torch.Tensor:
-        observation_batch = decode_observations(observations)
+    def forward(self, obs) -> torch.Tensor:
+        assert isinstance(obs, torch.Tensor), "Tetris observations are a single Box tensor"
+        observation_batch = decode_observations(obs)
         afterstates = enumerate_agent_afterstates(
             observation_batch.columns,
             observation_batch.current_pieces,
@@ -212,9 +214,9 @@ class TetrisDuelingPolicy(DQNPolicy):
         network_arguments = self._update_features_extractor(self.net_args, features_extractor=None)
         return DuelingQNetwork(**network_arguments).to(self.device)
 
-    def _predict(self, observations, deterministic: bool = True) -> torch.Tensor:
+    def _predict(self, obs, deterministic: bool = True) -> torch.Tensor:
         del deterministic
-        return self.q_net(observations).argmax(dim=1)
+        return self.q_net(obs).argmax(dim=1)
 
 
 class TetrisAfterstatePolicy(DQNPolicy):
@@ -224,9 +226,9 @@ class TetrisAfterstatePolicy(DQNPolicy):
         network_arguments = self._update_features_extractor(self.net_args, features_extractor=None)
         return AfterstateQNetwork(**network_arguments).to(self.device)
 
-    def _predict(self, observations, deterministic: bool = True) -> torch.Tensor:
+    def _predict(self, obs, deterministic: bool = True) -> torch.Tensor:
         del deterministic
-        return self.q_net(observations).argmax(dim=1)
+        return self.q_net(obs).argmax(dim=1)
 
 
 class TetrisDQN(DQN):
@@ -238,7 +240,7 @@ class TetrisDQN(DQN):
         state=None,
         episode_start=None,
         deterministic: bool = False,
-    ):
+    ) -> tuple[np.ndarray, tuple[np.ndarray, ...] | None]:
         should_explore = not deterministic and np.random.random() < self.exploration_rate
         if should_explore:
             return self._sample_canonical_actions(observation), state
@@ -249,7 +251,9 @@ class TetrisDQN(DQN):
             deterministic,
         )
 
-    def _sample_action(self, learning_starts, action_noise=None, n_envs: int = 1):
+    def _sample_action(
+        self, learning_starts, action_noise=None, n_envs: int = 1
+    ) -> tuple[np.ndarray, np.ndarray]:
         if self.num_timesteps < learning_starts:
             if self._last_obs is None:
                 raise RuntimeError("cannot sample a warm-up action without an observation")

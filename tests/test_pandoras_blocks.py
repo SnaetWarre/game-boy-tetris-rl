@@ -113,7 +113,7 @@ class OneFrameArePyBoy(FakeMemoryPyBoy):
 def create_adapter_for_memory_tests() -> tuple[PandorasBlocksAdapter, FakeMemoryPyBoy]:
     fake_pyboy = FakeMemoryPyBoy()
     adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
-    adapter._pyboy = fake_pyboy
+    adapter._pyboy = fake_pyboy  # pyright: ignore[reportAttributeAccessIssue]
     adapter._cleared_line_total = 0
     adapter._current_clear_was_counted = False
     return adapter, fake_pyboy
@@ -170,7 +170,7 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
     def test_releases_hard_drop_button_when_the_piece_tops_out(self) -> None:
         fake_pyboy = TopOutPyBoy()
         adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
-        adapter._pyboy = fake_pyboy
+        adapter._pyboy = fake_pyboy  # pyright: ignore[reportAttributeAccessIssue]
         adapter._cleared_line_total = 0
         adapter._current_clear_was_counted = False
         fake_pyboy.memory[adapter._MODE_ADDRESS] = adapter._PIECE_IN_MOTION_MODE
@@ -190,7 +190,7 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
     def test_moves_directly_from_the_spawn_column_to_the_target(self) -> None:
         fake_pyboy = MovingPiecePyBoy()
         adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
-        adapter._pyboy = fake_pyboy
+        adapter._pyboy = fake_pyboy  # pyright: ignore[reportAttributeAccessIssue]
         adapter._cleared_line_total = 0
         adapter._current_clear_was_counted = False
         fake_pyboy.memory[adapter._MODE_ADDRESS] = adapter._PIECE_IN_MOTION_MODE
@@ -217,7 +217,7 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
             with self.subTest(spawn_in_press_frame=spawn_in_press_frame):
                 fake_pyboy = OneFrameArePyBoy(spawn_in_press_frame=spawn_in_press_frame)
                 adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
-                adapter._pyboy = fake_pyboy
+                adapter._pyboy = fake_pyboy  # pyright: ignore[reportAttributeAccessIssue]
                 adapter._cleared_line_total = 0
                 adapter._current_clear_was_counted = False
 
@@ -229,7 +229,7 @@ class PandorasBlocksMemoryTests(unittest.TestCase):
     def test_restores_gravity_after_placement_input(self) -> None:
         fake_pyboy = TopOutPyBoy()
         adapter = PandorasBlocksAdapter.__new__(PandorasBlocksAdapter)
-        adapter._pyboy = fake_pyboy
+        adapter._pyboy = fake_pyboy  # pyright: ignore[reportAttributeAccessIssue]
         adapter._cleared_line_total = 0
         adapter._current_clear_was_counted = False
         fake_pyboy.memory[adapter._MODE_ADDRESS] = adapter._PIECE_IN_MOTION_MODE

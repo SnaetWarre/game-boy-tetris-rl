@@ -245,6 +245,8 @@ def score_boards(columns: torch.Tensor, cleared_lines: torch.Tensor) -> torch.Te
     # Every empty cell below a column's top block is a hole.
     holes = aggregate_height - tables.popcounts[columns].sum(dim=-1)
     bumpiness = column_heights.diff(dim=-1).abs().sum(dim=-1)
+    # Weights from Yiyuan Lee, "Tetris AI: The (Near) Perfect Bot" (2013):
+    # https://codemyroad.wordpress.com/2013/04/14/tetris-ai-the-near-perfect-player/
     return (
         0.760666 * cleared_lines.double()
         - 0.510066 * aggregate_height.double()

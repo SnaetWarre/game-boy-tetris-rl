@@ -2,6 +2,7 @@ import json
 from dataclasses import dataclass
 from itertools import count
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -22,6 +23,9 @@ from gb_tetris_rl.game.contracts import (
     EpisodeInfo,
 )
 from gb_tetris_rl.game.environment import TetrisEnvironment
+
+if TYPE_CHECKING:
+    from stable_baselines3 import DQN
 
 
 @dataclass(frozen=True)
@@ -147,7 +151,7 @@ def evaluate_agent(
     return episode_summaries
 
 
-def _load_compatible_agent(model_path: str | Path, device: str):
+def _load_compatible_agent(model_path: str | Path, device: str) -> "DQN":
     try:
         from stable_baselines3 import DQN
     except ImportError as import_error:

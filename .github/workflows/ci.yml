@@ -31,5 +31,8 @@ jobs:
           uv run ruff check .
           uv run ruff format --check .
 
+      - name: Check types
+        run: uv run pyright
+
       - name: Run tests
         run: uv run pytest -q

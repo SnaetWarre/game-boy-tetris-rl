@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gb-tetris-rl"
-version = "0.3.0"
+version = "0.4.0"
 description = "Hold-aware spatial dueling policy training for Pandora's Blocks through PyBoy"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,6 +21,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "pyright[nodejs]>=1.1.400,<2",
   "pytest>=8,<10",
   "ruff>=0.12,<1",
 ]
@@ -33,6 +34,10 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.11"
 
 [tool.ruff]
 line-length = 100

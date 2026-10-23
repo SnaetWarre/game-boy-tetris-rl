@@ -2,6 +2,7 @@ import time
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+from typing import TYPE_CHECKING, NoReturn
 
 import gymnasium as gym
 
@@ -10,6 +11,12 @@ from gb_tetris_rl.game.environment import (
     agent_action_space,
     agent_observation_space,
 )
+
+if TYPE_CHECKING:
+    from stable_baselines3.common.monitor import Monitor
+
+    from gb_tetris_rl.agent.imitation import BehaviourPolicy, DemonstrationDataset
+    from gb_tetris_rl.agent.smart_dqn import TetrisDQN
 
 POLICY_ARCHITECTURES = ("afterstate", "dueling")
 _IMITATION_BATCH_SIZE = 256
@@ -45,10 +52,10 @@ class _ContractOnlyEnvironment(gym.Env):
         self.observation_space = agent_observation_space()
         self.action_space = agent_action_space()
 
-    def reset(self, *, seed=None, options=None):
+    def reset(self, *, seed=None, options=None) -> NoReturn:
         raise RuntimeError("the contract-only environment cannot be reset")
 
-    def step(self, action):
+    def step(self, action) -> NoReturn:
         raise RuntimeError("the contract-only environment cannot be stepped")
 
 
@@ -58,7 +65,7 @@ def _create_monitored_environment(
     render_mode: str | None,
     display_emulator_window: bool | None = None,
     emulation_speed: int = 0,
-):
+) -> "Monitor":
     from stable_baselines3.common.monitor import Monitor
 
     return Monitor(
@@ -192,17 +199,19 @@ def _create_training_environment(rom_path, config: TrainingConfig, subprocess_ve
 
 
 def _run_imitation_stage(
-    dqn_agent,
+    dqn_agent: "TetrisDQN",
     run_directory: Path,
     config: TrainingConfig,
-):
+) -> Path:
     from gb_tetris_rl.agent.imitation import (
         generate_planner_demonstrations,
         greedy_policy,
         pretrain_policy_from_demonstrations,
     )
 
-    def collect_demonstrations(seed: int, behaviour_policy=None):
+    def collect_demonstrations(
+        seed: int, behaviour_policy: "BehaviourPolicy | None" = None
+    ) -> "DemonstrationDataset":
         started_at = time.perf_counter()
         demonstration_dataset = generate_planner_demonstrations(
             config.demonstration_count,

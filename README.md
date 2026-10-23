@@ -118,6 +118,10 @@ a source of imitation labels, and an optional demo guard or override. A
 placement that leaves the known next piece nowhere to go now counts as a
 top-out in its lookahead instead of scoring as neutral.
 
+The planner scores boards with the four weights (lines cleared, aggregate
+height, holes, bumpiness) from Yiyuan Lee's
+[Tetris AI: The (Near) Perfect Bot](https://codemyroad.wordpress.com/2013/04/14/tetris-ai-the-near-perfect-player/).
+
 ## Train
 
 ```sh

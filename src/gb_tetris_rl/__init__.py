@@ -1,3 +1,5 @@
 """Hold-aware reinforcement learning for Pandora's Blocks."""
 
-__version__ = "0.3.0"
+from importlib.metadata import version
+
+__version__ = version("gb-tetris-rl")
